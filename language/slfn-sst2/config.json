@@ -1,8 +1,0 @@
-{
-  "tokenizer_name": "bert-base-uncased",
-  "embed_dim": 256,
-  "max_length": 128,
-  "num_labels": 2,
-  "vocab_size": 30522,
-  "pad_token_id": 0
-}

@@ -18,11 +18,11 @@ READ_CHUNK_SIZE = 25_000
 REMOTE_TIMEOUT_SECONDS = 20
 TEST_SIZE = 0.2
 HIDDEN_UNITS = 64
-EPOCHS = 30
+EPOCHS = 1000
 BATCH_SIZE = 256
 LEARNING_RATE = 1e-3
 SEED = 42
-reg_lambda = 1
+reg_lambda = 1e-3
 
 def orthogonal_regularization(weight):
 
@@ -263,6 +263,13 @@ def main() -> None:
     model = HiggsNN(input_dim=X_train.shape[1], hidden_units=HIDDEN_UNITS).to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=16,
+        min_lr=1e-8,
+    )
 
     log("Starting training...")
     for epoch in range(EPOCHS):
@@ -291,11 +298,15 @@ def main() -> None:
             val_pred = (val_prob >= 0.5).float()
             val_accuracy = (val_pred == y_test_tensor.to(device)).float().mean().item()
 
+        scheduler.step(val_loss)
+        current_lr = optimizer.param_groups[0]["lr"]
+
         log(
             f"Epoch {epoch + 1:02d}/{EPOCHS} - "
             f"loss: {epoch_loss:.4f} - "
             f"val_loss: {val_loss:.4f} - "
-            f"val_acc: {val_accuracy:.4f}"
+            f"val_acc: {val_accuracy:.4f} - "
+            f"lr: {current_lr:.2e}"
         )
 
     model.eval()
