@@ -139,7 +139,7 @@ def main():
     model = SLFN_CIFAR(HIDDEN_DIM).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=3e-4)
-    min_lr = 3e-9
+    min_lr = 1e-8
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='min',
@@ -165,7 +165,7 @@ def main():
         scheduler.step(val_loss)
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Epoch {epoch}: Learning rate {current_lr:.2e}")
-        if current_lr <= min_lr:
+        if current_lr <= 2*min_lr:
             print("Minimum learning rate reached. Stopping training.")
             break
 
