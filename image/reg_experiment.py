@@ -14,7 +14,7 @@ WEIGHT_DECAY=0
 DROPOUT=0
 BATCH_NORM=False
 
-# python np_reg.py --o-reg-lambda=3e-5 --batch-size=128 | tee out4.txt; python np_reg.py --o-reg-lambda=3e-5 --batch-size=256 | tee out5.txt; python np_reg.py --o-reg-lambda=3e-5 --batch-size=512 | tee out6.txt;
+# python np_reg.py --o-reg-lambda=3e-4 --batch-size=128 | tee out10.txt; python np_reg.py --o-reg-lambda=3e-4 --batch-size=256 | tee out11.txt; python np_reg.py --o-reg-lambda=3e-4 --batch-size=512 | tee out12.txt;
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -197,12 +197,12 @@ def main():
             break
 
     print(
-        f"Run finished with arguments: batch_size={args.batch_size}, "
-        f"np_reg_lambda={args.np_reg_lambda}"
-        f"o_reg_lambda={args.o_reg_lambda}"
-        f"weight_degay={args.weight_decay}"
-        f"dropout={args.dropout}"
-        f"batchnorm={args.batch_norm}"
+        f"Run finished with arguments: \nbatch_size={args.batch_size}\n"
+        f"np_reg_lambda={args.np_reg_lambda}\n"
+        f"o_reg_lambda={args.o_reg_lambda}\n"
+        f"weight_degay={args.weight_decay}\n"
+        f"dropout={args.dropout}\n"
+        f"batchnorm={args.batch_norm}\n"
     )
     print(f"Best val loss: {best_val_loss:.6f}")
     print(f"Best val accuracy: {best_accuracy:.2f}%")
