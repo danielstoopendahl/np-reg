@@ -14,7 +14,20 @@ WEIGHT_DECAY=0
 DROPOUT=0
 BATCH_NORM=False
 
-# python np_reg.py --o-reg-lambda=3e-4 --batch-size=128 | tee out10.txt; python np_reg.py --o-reg-lambda=3e-4 --batch-size=256 | tee out11.txt; python np_reg.py --o-reg-lambda=3e-4 --batch-size=512 | tee out12.txt;
+# Next smaller model
+# python np_reg.py --np-reg-lambda=1e-2 --batch-size=128 | tee out20.txt; python np_reg.py --np-reg-lambda=1e-2 --batch-size=256 | tee out21.txt; python np_reg.py --np-reg-lambda=1e-2 --batch-size=512 | tee out22.txt;
+# python np_reg.py --np-reg-lambda=3e-2 --batch-size=128 | tee out23.txt; python np_reg.py --np-reg-lambda=3e-2 --batch-size=256 | tee out24.txt; python np_reg.py --np-reg-lambda=3e-2 --batch-size=512 | tee out25.txt;
+# python np_reg.py --np-reg-lambda=1e-1 --batch-size=128 | tee out26.txt; python np_reg.py --np-reg-lambda=1e-1 --batch-size=256 | tee out27.txt; python np_reg.py --np-reg-lambda=1e-1 --batch-size=512 | tee out28.txt;
+# python np_reg.py --np-reg-lambda=3e-1 --batch-size=128 | tee out29.txt; python np_reg.py --np-reg-lambda=3e-1 --batch-size=256 | tee out30.txt; python np_reg.py --np-reg-lambda=3e-1 --batch-size=512 | tee out31.txt;
+# python np_reg.py --np-reg-lambda=1 --batch-size=128 | tee out32.txt; python np_reg.py --np-reg-lambda=1 --batch-size=256 | tee out33.txt; python np_reg.py --np-reg-lambda=1 --batch-size=512 | tee out34.txt;
+# python np_reg.py --np-reg-lambda=3 --batch-size=128 | tee out35.txt; python np_reg.py --np-reg-lambda=3 --batch-size=256 | tee out36.txt; python np_reg.py --np-reg-lambda=3 --batch-size=512 | tee out37.txt;
+
+# python np_reg.py --weight-decay=1e-6 --batch-size=128 | tee out38.txt; python np_reg.py --weight-decay=1e-6 --batch-size=256 | tee out39.txt; python np_reg.py --weight-decay=1e-6 --batch-size=512 | tee out40.txt;
+# python np_reg.py --weight-decay=3e-6 --batch-size=128 | tee out41.txt; python np_reg.py --weight-decay=3e-6 --batch-size=256 | tee out42.txt; python np_reg.py --weight-decay=3e-6 --batch-size=512 | tee out43.txt;
+# python np_reg.py --weight-decay=1e-5 --batch-size=128 | tee out44.txt; python np_reg.py --weight-decay=1e-5 --batch-size=256 | tee out45.txt; python np_reg.py --weight-decay=1e-5 --batch-size=512 | tee out46.txt;
+# python np_reg.py --weight-decay=3e-5 --batch-size=128 | tee out47.txt; python np_reg.py --weight-decay=3e-5 --batch-size=256 | tee out48.txt; python np_reg.py --weight-decay=3e-5 --batch-size=512 | tee out49.txt;
+# python np_reg.py --weight-decay=1e-4 --batch-size=128 | tee out50.txt; python np_reg.py --weight-decay=1e-4 --batch-size=256 | tee out51.txt; python np_reg.py --weight-decay=1e-4 --batch-size=512 | tee out52.txt;
+# python np_reg.py --weight-decay=3e-4 --batch-size=128 | tee out53.txt; python np_reg.py --weight-decay=3e-4 --batch-size=256 | tee out54.txt; python np_reg.py --weight-decay=3e-4 --batch-size=512 | tee out55.txt;
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -165,7 +178,7 @@ def main():
 
     model = SLFN_CIFAR(HIDDEN_DIM, args.dropout, args.batch_norm).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=3e-4, weight_decay=args.weight_decay)
+    optimizer = optim.AdamW(model.parameters(), lr=3e-4, weight_decay=args.weight_decay)
     min_lr = 1e-8
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,

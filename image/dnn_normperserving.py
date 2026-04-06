@@ -5,10 +5,7 @@ from torchvision import datasets, transforms
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from ResNet18 import ResNet18
-
-
-def npreg(data, features, reg_lambda=1e-4):
+def npreg(data, features, reg_lambda=1e-2):
     """
     Computes the norm-preserving regularization penalty.
     Penalizes differences between the norm of input data and the norm of output features.
@@ -49,20 +46,23 @@ class DNN(nn.Module):
 
         input_dim = 3 * 32 * 32
         first_dim = 2048
-        second_dim = 512
+        second_dim = 2048
         self.first_linear = nn.Linear(input_dim, first_dim)
         self.second_linear = nn.Linear(first_dim, second_dim)
         self.third_linear = nn.Linear(second_dim, num_classes)
         self.non_linear = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
 
-    def forward_features(self, x):
+    def forward_half(self, x):
         x = torch.flatten(x, 1)
         x = self.first_linear(x)
         x = self.non_linear(x)
+        return x
+
+    def forward_features(self, x):
+        x = self.forward_half(x)
         x = self.second_linear(x)
         x = self.non_linear(x)
-
         return x
 
     def forward_logits(self, x):
@@ -86,45 +86,15 @@ def train(model, device, train_loader, optimizer, epoch):
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
+        halfway = model.forward_half(data)
         features = model.forward_features(data)
-        logits = model.forward_logits(data)
-        first_ortho_loss = oreg(model.first_linear.weight)
-        second_ortho_loss = oreg(model.second_linear.weight)
-        npreg = npreg(data, features)
+        logits = model.third_linear(features)
+        # first_ortho_loss = oreg(model.first_linear.weight)
+        # second_ortho_loss = oreg(model.second_linear.weight)
+        first_npreg = npreg(data, halfway)
+        second_npreg = npreg(halfway, features)
 
-        loss = F.cross_entropy(logits, target) + npreg
-        loss.backward()
-        optimizer.step()
-
-        running_loss += loss.item()
-        if batch_idx % 100 == 0:
-            print(
-                f"Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)}] "
-                f"Loss: {loss.item():.6f}"
-            )
-
-    return running_loss / len(train_loader)
-
-
-def train_with_teacher(model, device, train_loader, optimizer, criterion, epoch, teacher):
-    model.train()
-    running_loss = 0.0
-    teacher.eval()
-
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        logits = model.forward_logits(data)
-        features = model.forward_features(data)
-         
-        with torch.no_grad():
-            target = teacher.forward_logits(data)
-
-        first_ortho_loss = oreg(model.first_linear.weight)
-        second_ortho_loss = oreg(model.second_linear.weight)
-        npreg = npreg(data, features)
-
-        loss = F.cross_entropy(logits, target) + first_ortho_loss + second_ortho_loss
+        loss = F.cross_entropy(logits, target) + first_npreg + second_npreg
         loss.backward()
         optimizer.step()
 
@@ -188,8 +158,6 @@ def main():
     filename = 'models/resnet1_oreg_dnn.pth'
 
     model = DNN(num_classes=10).to(device)
-    # print("continuing from previous save")
-    # model.load_state_dict(torch.load(filename))
 
     optimizer = optim.Adam(model.parameters(), lr=3e-4)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -199,14 +167,8 @@ def main():
         patience=12,
         min_lr=1e-8,
     )
-    criterion = nn.MSELoss()
-
-    print('loading teacher...')
-    teacher = ResNet18().to(device)
-    teacher.load_state_dict(torch.load('models/resnet18_cifar10_vanilla.pth'))
 
     for epoch in range(1,1001):
-        # train_loss = train_with_teacher(model, device, train_loader, optimizer, criterion, epoch, teacher)
         train_loss = train(model, device, train_loader, optimizer, epoch)
 
         print(f"Epoch {epoch}: Train loss {train_loss:.6f}")
