@@ -105,7 +105,7 @@ def validate(model, loss_fn, X_val, y_val):
 
 def main():
     args = parse_args()
-    processed_file = "dataset_higgs.pt"
+    processed_file = "data/dataset_higgs.pt"
 
     print("Loading dataset...")
     data = torch.load(processed_file)
