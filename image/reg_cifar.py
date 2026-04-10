@@ -76,9 +76,9 @@ class SLFN_CIFAR(nn.Module):
     def forward_features(self, x):
         x = torch.flatten(x, 1)
         x = self.first_linear(x)
-        x = self.non_linear(x)
         if self.use_batch_norm:
             x = self.batch_norm(x)
+        x = self.non_linear(x)
         x = self.drop(x)
         return x
 

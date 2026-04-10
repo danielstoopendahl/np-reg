@@ -16,6 +16,7 @@ def parser():
     parser.add_argument("--weight-decay", type=float, default=0)
     parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
+    parser.add_argument("--batch-norm", action="store_true", default=False)
     return parser.parse_args()
 
 def normperserving_regularization(data, features, reg_lambda):
@@ -36,7 +37,7 @@ def orthogonal_regularization(weight, reg_lambda):
 
 
 class SLFN_IMDB(nn.Module):
-    def __init__(self, hidden_dim: int, mlp_dropout: float):
+    def __init__(self, hidden_dim: int, mlp_dropout: float, use_batch_norm: bool):
         super().__init__()
         embedding_dim = 768
         num_classes = 2
@@ -45,9 +46,13 @@ class SLFN_IMDB(nn.Module):
         self.non_linear = nn.ReLU()
         self.second_linear = nn.Linear(hidden_dim, num_classes)
         self.dropout = nn.Dropout(mlp_dropout)
+        self.use_batch_norm = use_batch_norm
+        self.batch_norm = nn.BatchNorm1d(hidden_dim)
 
     def forward_features(self, cls_embedding: torch.Tensor):
         features = self.first_linear(cls_embedding)
+        if self.use_batch_norm:
+            x = self.batch_norm(x)
         features = self.non_linear(features)
         features = self.dropout(features)
         return features
@@ -136,7 +141,7 @@ def main():
     embedding_path = "data/imdb_bert_embeddings.pt"
     train_loader, val_loader, test_loader = build_dataloaders_from_cache(embedding_path=embedding_path, batch_size=args.batch_size)
 
-    model = SLFN_IMDB(hidden_dim=args.hidden_dim, mlp_dropout=args.dropout).to(device)
+    model = SLFN_IMDB(hidden_dim=args.hidden_dim, mlp_dropout=args.dropout, use_batch_norm=args.batch_norm).to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=args.weight_decay)

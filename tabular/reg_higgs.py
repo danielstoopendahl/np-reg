@@ -60,9 +60,9 @@ class SLFN(nn.Module):
           
     def forward_features(self, x):
         x = self.fc1(x)
-        x = self.relu(x)
         if self.use_batch_norm:
             x = self.batch_norm(x)
+        x = self.relu(x)
         x = self.drop(x)
         return x
       
