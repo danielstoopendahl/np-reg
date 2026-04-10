@@ -5,6 +5,10 @@ from transformers import AutoModel, AutoTokenizer, DataCollatorWithPadding
 
 SEED = 42
 
+
+# pip uninstall torch torchvision -y
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
 def build_tokenized_datasets(tokenizer_name: str):
     dataset = load_dataset("imdb")
     split = dataset["train"].train_test_split(test_size=0.2, seed=SEED)
@@ -61,7 +65,7 @@ def precompute_split_embeddings(bert_model, dataloader, device):
 
 def build_embedding_cache(device):
     model_name = "bert-base-uncased"
-    embedding_path = "embeddings/imdb_bert_embeddings.pt"
+    embedding_path = "data/imdb_bert_embeddings.pt"
         
     print("Building tokenized IMDB dataset for embedding precompute...")
     train_dataset, val_dataset, test_dataset, tokenizer = build_tokenized_datasets(tokenizer_name=model_name)
@@ -70,8 +74,8 @@ def build_embedding_cache(device):
     collator = DataCollatorWithPadding(tokenizer=tokenizer)
     
     train_loader = DataLoader(train_dataset, batch_size=128, shuffle=False,collate_fn=collator)
-    val_loader = train_loader = DataLoader(val_dataset, batch_size=128, shuffle=False, collate_fn=collator)
-    test_loader = train_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, collate_fn=collator)
+    val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False, collate_fn=collator)
+    test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, collate_fn=collator)
 
     print("Precomputing train embeddings...")
     train_embeddings, train_labels = precompute_split_embeddings(bert_model, train_loader, device)

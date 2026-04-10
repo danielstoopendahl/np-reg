@@ -4,11 +4,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import torch.nn.functional as F
 
-# pip uninstall torch torchvision -y
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
 SEED = 42
-EPOCHS = 40
+EPOCHS = 70
 
 def parser():
     parser = argparse.ArgumentParser(description="Frozen pretrained BERT + MLP for IMDB sentiment")
@@ -62,7 +60,7 @@ class SLFN_IMDB(nn.Module):
 
 def build_dataloaders_from_cache(embedding_path, batch_size: int):
     
-    cache = torch.load(embedding_path, map_location="cpu")
+    cache = torch.load(embedding_path, map_location="cpu", weights_only=True)
     
     train_dataset = TensorDataset(cache["train_embeddings"], cache["train_labels"])
     val_dataset = TensorDataset(cache["val_embeddings"], cache["val_labels"])
@@ -135,7 +133,7 @@ def main():
     args = parser()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    embedding_path = "embeddings/imdb_bert_embeddings.pt"
+    embedding_path = "data/imdb_bert_embeddings.pt"
     train_loader, val_loader, test_loader = build_dataloaders_from_cache(embedding_path=embedding_path, batch_size=args.batch_size)
 
     model = SLFN_IMDB(hidden_dim=args.hidden_dim, mlp_dropout=args.dropout).to(device)
@@ -159,21 +157,21 @@ def main():
 
         print(
             f"Epoch {epoch}/{EPOCHS} | "
-            f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} | "
-            f"val_loss={val_loss:.4f} val_acc={val_acc:.4f} | "
+            f"train_loss={train_loss:.4f} train_acc={train_acc * 100:.2f}% | "
+            f"val_loss={val_loss:.4f} val_acc={val_acc * 100:.2f}% | "
             f"lr={optimizer.param_groups[0]['lr']:.6e}"
         )
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            torch.save(model.state_dict(), "frozen_bert_mlp_imdb.pt")
-            print(f"Saved new best model to {"frozen_bert_mlp_imdb.pt"}")
+            torch.save(model.state_dict(), "models/frozen_bert_mlp_imdb.pt")
+            print("Saved new best model to models/frozen_bert_mlp_imdb.pt")
 
-    checkpoint = torch.load("frozen_bert_mlp_imdb.pt", map_location=device)
+    checkpoint = torch.load("models/frozen_bert_mlp_imdb.pt", map_location=device, weights_only=True)
     model.load_state_dict(checkpoint)
 
     test_loss, test_acc = test(model, test_loader, criterion, device, args.o_reg_lambda, args.np_reg_lambda)
-    print(f"Test loss={test_loss:.4f} | Test accuracy={test_acc:.4f}")
+    print(f"Test loss={test_loss:.4f} | Test accuracy={test_acc * 100:.2f}%")
 
 
 if __name__ == "__main__":
