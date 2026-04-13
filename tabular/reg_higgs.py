@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import roc_curve, auc
 import argparse
 import torch.nn.functional as F
@@ -72,13 +71,15 @@ class SLFN(nn.Module):
         return self.fc2(x)
     
 
-def train_one_epoch(model, optimizer, loss_fn, train_loader, np_reg_lambda, o_reg_lambda):
+def train_one_epoch(model, optimizer, loss_fn, X_train, y_train, batch_size, np_reg_lambda, o_reg_lambda):
     model.train()
-    train_size = len(train_loader.dataset)
+    train_size = X_train.size(0)
     running_loss = 0.0
-    for batch_X, batch_y in train_loader:
-        batch_X = batch_X.to(device, non_blocking=True)
-        batch_y = batch_y.to(device, non_blocking=True)
+    perm = torch.randperm(train_size, device=X_train.device)
+    for start in range(0, train_size, batch_size):
+        idx = perm[start:start + batch_size]
+        batch_X = X_train[idx]
+        batch_y = y_train[idx]
         optimizer.zero_grad()
         features = model.forward_features(batch_X)
         logits = model.fc2(features)
@@ -89,34 +90,17 @@ def train_one_epoch(model, optimizer, loss_fn, train_loader, np_reg_lambda, o_re
 
     return running_loss / train_size
 
-def validate(model, loss_fn, val_loader):
+def validate(model, loss_fn, X_val, y_val):
     with torch.no_grad():
         model.eval()
-        val_loss_sum = 0.0
-        all_probs = []
-        all_labels = []
-        total = 0
-
-        for batch_X, batch_y in val_loader:
-            batch_X = batch_X.to(device, non_blocking=True)
-            batch_y = batch_y.to(device, non_blocking=True)
-            val_logits = model(batch_X)
-            batch_loss = loss_fn(val_logits, batch_y)
-
-            batch_size = batch_X.size(0)
-            val_loss_sum += batch_loss.item() * batch_size
-            total += batch_size
-
-            all_probs.append(torch.sigmoid(val_logits).view(-1).cpu())
-            all_labels.append(batch_y.view(-1).cpu())
-
-        val_probs = torch.cat(all_probs).numpy()
-        val_labels = torch.cat(all_labels).numpy()
+        val_logits = model(X_val)
+        val_loss = loss_fn(val_logits, y_val)
+        val_probs = torch.sigmoid(val_logits).view(-1).cpu().numpy()
+        val_labels = y_val.view(-1).cpu().numpy()
         fpr, tpr, _ = roc_curve(val_labels, val_probs)
         val_roc_auc = auc(fpr, tpr)
-        val_loss = val_loss_sum / total
 
-    return val_loss, val_roc_auc
+    return val_loss.item(), val_roc_auc
 
 
 def main():
@@ -125,23 +109,10 @@ def main():
 
     print("Loading dataset...")
     data = torch.load(processed_file)
-    X_train, y_train = data['X_train'], data['y_train']
-    X_val, y_val = data['X_val'], data['y_val']
+    X_train, y_train = data['X_train'].to(device), data['y_train'].to(device)
+    X_val, y_val = data['X_val'].to(device), data['y_val'].to(device)
     y_train = y_train.float().view(-1, 1)
     y_val = y_val.float().view(-1, 1)
-
-    train_loader = DataLoader(
-        TensorDataset(X_train, y_train),
-        batch_size=args.batch_size,
-        shuffle=True,
-        pin_memory=torch.cuda.is_available(),
-    )
-    val_loader = DataLoader(
-        TensorDataset(X_val, y_val),
-        batch_size=args.batch_size,
-        shuffle=False,
-        pin_memory=torch.cuda.is_available(),
-    )
 
     model = SLFN(args.dropout, args.batch_norm).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=3e-2, weight_decay=args.weight_decay)
@@ -153,8 +124,8 @@ def main():
     best_val_loss = float("inf")
     best_val_roc_auc = float("-inf")
     for epoch in range(1000):
-        avg_train_loss = train_one_epoch(model, opt, loss_fn, train_loader, args.np_reg_lambda, args.o_reg_lambda)
-        val_loss, val_roc_auc = validate(model, loss_fn, val_loader)
+        avg_train_loss = train_one_epoch(model, opt, loss_fn, X_train, y_train, args.batch_size, args.np_reg_lambda, args.o_reg_lambda)
+        val_loss, val_roc_auc = validate(model, loss_fn, X_val, y_val)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
         if val_roc_auc > best_val_roc_auc:
