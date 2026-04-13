@@ -115,7 +115,7 @@ def main():
     y_val = y_val.float().view(-1, 1)
 
     model = SLFN(args.dropout, args.batch_norm).to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=args.weight_decay)
+    opt = torch.optim.AdamW(model.parameters(), lr=3e-2, weight_decay=args.weight_decay)
     min_lr = 1e-7
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=16, min_lr=min_lr,)
     loss_fn = nn.BCEWithLogitsLoss()
@@ -130,9 +130,9 @@ def main():
             best_val_loss = val_loss
         if val_roc_auc > best_val_roc_auc:
             best_val_roc_auc = val_roc_auc
-        scheduler.step(val_loss)
+        scheduler.step(avg_train_loss)
         current_lr = opt.param_groups[0]["lr"]
-        print(f"Epoch {epoch+1:02d}/{1000} - Loss: {avg_train_loss:.4f} - Val ROC-AUC: {val_roc_auc:.4f}")
+        print(f"Epoch {epoch+1:02d}/{1000} - Loss: {avg_train_loss:.4f} - Val ROC-AUC: {val_roc_auc:.4f} - Learning rate: {current_lr}")
         if current_lr < 2 * min_lr:
             print("Minimum learning rate reached. Stopping training.")
             break
