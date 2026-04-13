@@ -45,37 +45,39 @@ class DNN(nn.Module):
         super(DNN, self).__init__()
 
         input_dim = 3 * 32 * 32
-        first_dim = 2048
-        second_dim = 2048
-        self.first_linear = nn.Linear(input_dim, first_dim)
-        self.second_linear = nn.Linear(first_dim, second_dim)
-        self.third_linear = nn.Linear(second_dim, num_classes)
+        hidden_dim = 2048
+        self.first_linear = nn.Linear(input_dim, hidden_dim)
+        self.second_linear = nn.Linear(hidden_dim, hidden_dim)
+        self.third_linear = nn.Linear(hidden_dim, hidden_dim)
+        self.fourth_linear = nn.Linear(hidden_dim, hidden_dim)
+        self.fifth_linear = nn.Linear(hidden_dim, hidden_dim)
+        self.output_linear = nn.Linear(hidden_dim, num_classes)
         self.non_linear = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
 
-    def forward_half(self, x):
+    def forward_hidden_layers(self, x):
         x = torch.flatten(x, 1)
-        x = self.first_linear(x)
-        x = self.non_linear(x)
-        return x
+        h1 = self.non_linear(self.first_linear(x))
+        h2 = self.non_linear(self.second_linear(h1))
+        h3 = self.non_linear(self.third_linear(h2))
+        h4 = self.non_linear(self.fourth_linear(h3))
+        h5 = self.non_linear(self.fifth_linear(h4))
+        return [h1, h2, h3, h4, h5]
+
+    def forward_half(self, x):
+        return self.forward_hidden_layers(x)[0]
 
     def forward_features(self, x):
-        x = self.forward_half(x)
-        x = self.second_linear(x)
-        x = self.non_linear(x)
-        return x
+        return self.forward_hidden_layers(x)[-1]
 
     def forward_logits(self, x):
         x = self.forward_features(x)
-        x = self.third_linear(x)
+        x = self.output_linear(x)
         return x
 
     def forward(self, x):
         logits = self.forward_logits(x)
         return self.softmax(logits)
-
-    def first_two_linear_combined_weight(self):
-        return torch.mm(self.first_linear.weight, self.bottleneck.weight)
 
 
 def train(model, device, train_loader, optimizer, epoch):
@@ -86,15 +88,13 @@ def train(model, device, train_loader, optimizer, epoch):
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
-        halfway = model.forward_half(data)
-        features = model.forward_features(data)
-        logits = model.third_linear(features)
+        hidden = model.forward_hidden_layers(data)
+        logits = model.output_linear(hidden[-1])
         # first_ortho_loss = oreg(model.first_linear.weight)
         # second_ortho_loss = oreg(model.second_linear.weight)
-        first_npreg = npreg(data, halfway)
-        second_npreg = npreg(halfway, features)
-
-        loss = F.cross_entropy(logits, target) + first_npreg + second_npreg
+        npreg_terms = [npreg(data, hidden[0])]
+        npreg_terms += [npreg(hidden[i], hidden[i + 1]) for i in range(len(hidden) - 1)]
+        loss = F.cross_entropy(logits, target) + sum(npreg_terms)
         loss.backward()
         optimizer.step()
 
