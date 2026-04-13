@@ -6,17 +6,18 @@ import torch.nn.functional as F
 
 
 SEED = 42
-EPOCHS = 70
+EPOCHS = 300
 
 def parser():
     parser = argparse.ArgumentParser(description="Frozen pretrained BERT + MLP for IMDB sentiment")
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--hidden-dim", type=int, default=1024)
+    parser.add_argument("--hidden-dim", type=int, default=2048)
     parser.add_argument("--dropout", type=float, default=0)
     parser.add_argument("--weight-decay", type=float, default=0)
     parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--batch-norm", action="store_true", default=False)
+    parser.add_argument("--learning-rate", type=float, default=1e-4)
     return parser.parse_args()
 
 def normperserving_regularization(data, features, reg_lambda):
@@ -52,7 +53,7 @@ class SLFN_IMDB(nn.Module):
     def forward_features(self, cls_embedding: torch.Tensor):
         features = self.first_linear(cls_embedding)
         if self.use_batch_norm:
-            x = self.batch_norm(x)
+            features = self.batch_norm(features)
         features = self.non_linear(features)
         features = self.dropout(features)
         return features
@@ -144,21 +145,13 @@ def main():
     model = SLFN_IMDB(hidden_dim=args.hidden_dim, mlp_dropout=args.dropout, use_batch_norm=args.batch_norm).to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=0.5,
-        patience=16,
-        min_lr=1e-8,
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 
     best_val_acc = -1.0
     for epoch in range(1, EPOCHS + 1):
         
         train_loss, train_acc = train(model, train_loader, criterion, optimizer, device, args.o_reg_lambda, args.np_reg_lambda)
         val_loss, val_acc = test(model, val_loader, criterion, device, args.o_reg_lambda, args.np_reg_lambda)
-        scheduler.step(val_loss)
 
         print(
             f"Epoch {epoch}/{EPOCHS} | "
@@ -171,6 +164,10 @@ def main():
             best_val_acc = val_acc
             torch.save(model.state_dict(), "models/frozen_bert_mlp_imdb.pt")
             print("Saved new best model to models/frozen_bert_mlp_imdb.pt")
+
+        if train_loss < 0.10:
+            print("Training finished")
+            break
 
     checkpoint = torch.load("models/frozen_bert_mlp_imdb.pt", map_location=device, weights_only=True)
     model.load_state_dict(checkpoint)

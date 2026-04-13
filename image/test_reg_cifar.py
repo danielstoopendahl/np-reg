@@ -1,0 +1,260 @@
+import argparse
+import random
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import datasets, transforms
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Subset, random_split
+
+HIDDEN_DIM = 16384 # [1024, 2048, 4096, 8192, 16384]
+BATCH_SIZE = 128 # [128, 256, 512]
+NP_REG_LAMBDA = 0 # [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1, 3, 10]
+O_REG_LAMBDA = 0 # []
+WEIGHT_DECAY=0
+DROPOUT=0
+BATCH_NORM=False
+EPOCHS = 1000
+SEED = 42 # [42, 43, 44, 45, 46]
+CHECKPOINT_PATH = "best_cifar_model.pt"
+
+
+def set_seed(seed):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+# python np_reg.py --weight-decay=1e-6 --batch-size=4096 | tee out229.txt; python np_reg.py --weight-decay=1e-6 --batch-size=1024 | tee out230.txt; python np_reg.py --weight-decay=1e-6 --batch-size=2048 | tee out231.txt; python np_reg.py --weight-decay=1e-4 --batch-size=4096 | tee out241.txt; python np_reg.py --weight-decay=1e-4 --batch-size=1024 | tee out242.txt; python np_reg.py --weight-decay=1e-4 --batch-size=2048 | tee out243.txt; python np_reg.py --dropout=0.2 --batch-size=4096 | tee out253.txt; python np_reg.py --dropout=0.2 --batch-size=1024 | tee out254.txt; python np_reg.py --dropout=0.2 --batch-size=2048 | tee out255.txt; python np_reg.py --o-reg-lambda=3e-1 --batch-size=256 | tee out303.txt; python np_reg.py --o-reg-lambda=3e-1 --batch-size=512 | tee out314.txt; python np_reg.py --o-reg-lambda=3 --batch-size=256 | tee out307.txt; python np_reg.py --o-reg-lambda=30 --batch-size=256 | tee out310.txt; 
+# python np_reg.py --weight-decay=3e-6 --batch-size=1024 | tee out232.txt; python np_reg.py --weight-decay=3e-6 --batch-size=2048 | tee out233.txt; python np_reg.py --weight-decay=3e-6 --batch-size=4096 | tee out234.txt; python np_reg.py --weight-decay=3e-4 --batch-size=4096 | tee out244.txt; python np_reg.py --weight-decay=3e-4 --batch-size=1024 | tee out245.txt; python np_reg.py --weight-decay=3e-4 --batch-size=2048 | tee out246.txt; python np_reg.py --dropout=0.25 --batch-size=4096 | tee out256.txt; python np_reg.py --dropout=0.25 --batch-size=1024 | tee out257.txt; python np_reg.py --dropout=0.25 --batch-size=2048 | tee out258.txt; python np_reg.py --o-reg-lambda=3e-1 --batch-size=1024 | tee out304.txt; python np_reg.py --o-reg-lambda=1 --batch-size=256 | tee out305.txt; python np_reg.py --o-reg-lambda=1 --batch-size=512 | tee out315.txt; python np_reg.py --o-reg-lambda=1 --batch-size=1024 | tee out306.txt; 
+# python np_reg.py --weight-decay=1e-5 --batch-size=2048 | tee out235.txt; python np_reg.py --weight-decay=1e-5 --batch-size=4096 | tee out236.txt; python np_reg.py --weight-decay=1e-5 --batch-size=1024 | tee out237.txt; python np_reg.py --dropout=0.1 --batch-size=4096 | tee out247.txt; python np_reg.py --dropout=0.1 --batch-size=1024 | tee out248.txt; python np_reg.py --dropout=0.1 --batch-size=2048 | tee out249.txt; python np_reg.py --dropout=0.3 --batch-size=4096 | tee out259.txt; python np_reg.py --dropout=0.3 --batch-size=1024 | tee out260.txt; python np_reg.py --dropout=0.3 --batch-size=2048 | tee out261.txt; python np_reg.py --o-reg-lambda=3 --batch-size=512 | tee out317.txt; python np_reg.py --o-reg-lambda=3 --batch-size=1024 | tee out308.txt; python np_reg.py --o-reg-lambda=10 --batch-size=256 | tee out309.txt; python np_reg.py --o-reg-lambda=10 --batch-size=1024 | tee out319.txt; python np_reg.py --o-reg-lambda=10 --batch-size=512 | tee out318.txt; 
+# python np_reg.py --weight-decay=3e-5 --batch-size=4096 | tee out238.txt; python np_reg.py --weight-decay=3e-5 --batch-size=1024 | tee out239.txt; python np_reg.py --weight-decay=3e-5 --batch-size=2048 | tee out240.txt; python np_reg.py --dropout=0.15 --batch-size=4096 | tee out250.txt; python np_reg.py --dropout=0.15 --batch-size=1024 | tee out251.txt; python np_reg.py --dropout=0.15 --batch-size=2048 | tee out252.txt; python np_reg.py --dropout=0.05 --batch-size=4096 | tee out262.txt; python np_reg.py --dropout=0.05 --batch-size=1024 | tee out263.txt; python np_reg.py --dropout=0.05 --batch-size=2048 | tee out264.txt; python np_reg.py --o-reg-lambda=30 --batch-size=512 | tee out320.txt; python np_reg.py --o-reg-lambda=30 --batch-size=1024 | tee out311.txt; python np_reg.py --o-reg-lambda=100 --batch-size=256 | tee out312.txt; python np_reg.py --o-reg-lambda=100 --batch-size=512 | tee out323.txt; python np_reg.py --o-reg-lambda=100 --batch-size=1024 | tee out313.txt;
+
+# python test_reg_cifar.py --seed=42 --batch-size=8192 | tee out22.txt; python test_reg_cifar.py --seed=42 --batch-size=2048 --batch-norm | tee out23.txt; python test_reg_cifar.py --seed=42 --batch-size=128 --np-reg-lambda=1 | tee out24.txt;  python test_reg_cifar.py --seed=42 --batch-size=256 --o-reg-lambda=10 | tee out25.txt; python test_reg_cifar.py --seed=42 --batch-size=2048 --weight-decay=1e-5 | tee out28.txt; python test_reg_cifar.py --seed=42 --batch-size=4096 --dropout=0.05 | tee out29.txt;
+# python test_reg_cifar.py --seed=43 --batch-size=8192 | tee out1.txt; python test_reg_cifar.py --seed=43 --batch-size=2048 --batch-norm | tee out2.txt; python test_reg_cifar.py --seed=43 --batch-size=4096 --dropout=0.05 | tee out3.txt; python test_reg_cifar.py --seed=43 --batch-size=128 --np-reg-lambda=1 | tee out4.txt;  python test_reg_cifar.py --seed=43 --batch-size=256 --o-reg-lambda=10 | tee out5.txt; python test_reg_cifar.py --seed=43 --batch-size=2048 --weight-decay=1e-5 | tee out30.txt;
+# python test_reg_cifar.py --seed=44 --batch-size=8192 | tee out6.txt; python test_reg_cifar.py --seed=44 --batch-size=2048 --batch-norm | tee out7.txt; python test_reg_cifar.py --seed=44 --batch-size=4096 --dropout=0.05 | tee out8.txt; python test_reg_cifar.py --seed=44 --batch-size=128 --np-reg-lambda=1 | tee out9.txt;  python test_reg_cifar.py --seed=44 --batch-size=256 --o-reg-lambda=10 | tee out10.txt; python test_reg_cifar.py --seed=44 --batch-size=2048 --weight-decay=1e-5 | tee out31.txt;
+# python test_reg_cifar.py --seed=45 --batch-size=8192 | tee out11.txt; python test_reg_cifar.py --seed=45 --batch-size=2048 --weight-decay=1e-5 | tee out12.txt; python test_reg_cifar.py --seed=45 --batch-size=4096 --dropout=0.05 | tee out13.txt; python test_reg_cifar.py --seed=45 --batch-size=128 --np-reg-lambda=1 | tee out14.txt;  python test_reg_cifar.py --seed=45 --batch-size=256 --o-reg-lambda=10 | tee out15.txt; python test_reg_cifar.py --seed=45 --batch-size=2048 --batch-norm | tee out26.txt; 
+# python test_reg_cifar.py --seed=46 --batch-size=8192 | tee out17.txt; python test_reg_cifar.py --seed=46 --batch-size=2048 --weight-decay=1e-5 | tee out18.txt; python test_reg_cifar.py --seed=46 --batch-size=4096 --dropout=0.05 | tee out19.txt; python test_reg_cifar.py --seed=46 --batch-size=128 --np-reg-lambda=1 | tee out20.txt;  python test_reg_cifar.py --seed=46 --batch-size=256 --o-reg-lambda=10 | tee out21.txt; python test_reg_cifar.py --seed=46 --batch-size=2048 --batch-norm | tee out27.txt; 
+
+
+# python reg_cifar.py --batch-norm --batch-size=128 | tee out200.txt;
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--np-reg-lambda", type=float, default=NP_REG_LAMBDA)
+    parser.add_argument("--o-reg-lambda", type=float, default=O_REG_LAMBDA)
+    parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY)
+    parser.add_argument("--dropout", type=float, default=DROPOUT)
+    parser.add_argument("--batch-norm", action="store_true", default=BATCH_NORM)
+    parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--seed", type=int, default=SEED)
+    return parser.parse_args()
+
+def normperserving_regularization(data, features, np_reg_lambda):
+    """
+    Computes the norm-preserving regularization penalty.
+    Penalizes differences between the norm of input data and the norm of output features.
+    """
+
+    data_norm = torch.norm(data.view(data.size(0), -1), p='fro', dim=1)
+    features_norm = torch.norm(features.view(features.size(0), -1), p='fro', dim=1)
+    norm_diff_loss = F.mse_loss(data_norm, features_norm)
+    
+    return np_reg_lambda * norm_diff_loss
+
+def orthogonal_regularization(weight, o_reg_lambda):
+    """
+    Computes the orthogonal regularization penalty: 
+    L = lambda * ||W^T W - I||_F^2
+    """
+
+    sym = torch.mm(weight.t(), weight)
+    identity = torch.eye(sym.size(0), device=weight.device)
+    loss_ortho = torch.norm(sym - identity, p='fro')**2
+    
+    return o_reg_lambda * loss_ortho
+
+
+class SLFN_CIFAR(nn.Module):
+    def __init__(self, hidden_dim, dropout, use_batch_norm):
+        super(SLFN_CIFAR, self).__init__()
+
+        input_dim = 3 * 32 * 32
+        output_dim = 10
+
+        self.first_linear = nn.Linear(input_dim, hidden_dim)
+        self.non_linear = nn.ReLU()
+        self.drop = nn.Dropout(p=dropout)
+        self.second_linear = nn.Linear(hidden_dim, output_dim)
+        self.use_batch_norm = use_batch_norm
+        self.batch_norm = nn.BatchNorm1d(hidden_dim)
+
+    def forward_features(self, x):
+        x = torch.flatten(x, 1)
+        x = self.first_linear(x)
+        if self.use_batch_norm:
+            x = self.batch_norm(x)
+        x = self.non_linear(x)
+        x = self.drop(x)
+        return x
+
+    def forward(self, x):
+        x = self.forward_features(x)
+        x = self.second_linear(x)
+        return x
+
+
+def train(model, device, train_loader, optimizer, epoch, np_reg_lambda, o_reg_lambda):
+    model.train()
+    running_loss = 0.0
+
+
+    for batch_idx, (data, target) in enumerate(train_loader):
+        data, target = data.to(device), target.to(device)
+        
+        optimizer.zero_grad()
+        features = model.forward_features(data)
+        normperserving_loss = normperserving_regularization(data, features, np_reg_lambda)
+        orthogonal_loss = orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
+        
+        logits = model.second_linear(features)
+        loss = F.cross_entropy(logits, target) + normperserving_loss + orthogonal_loss
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+        if batch_idx % 100 == 0:
+            print(
+                f"Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)}] "
+                f"Loss: {loss.item():.6f}"
+            )
+
+    return running_loss / len(train_loader)
+
+
+def test(model, device, test_loader, split_name="Validation"):
+    model.eval()
+    test_loss = 0.0
+    correct = 0
+
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            logits = model(data)
+            test_loss += F.cross_entropy(logits, target, reduction='sum').item()
+            pred = logits.argmax(dim=1, keepdim=True)
+            correct += pred.eq(target.view_as(pred)).sum().item()
+
+    test_loss /= len(test_loader.dataset)
+    accuracy = 100.0 * correct / len(test_loader.dataset)
+    print(
+        f"\n{split_name} set: Average loss: {test_loss:.4f}, "
+        f"Accuracy: {correct}/{len(test_loader.dataset)} ({accuracy:.2f}%)\n"
+    )
+    return test_loss, accuracy
+
+
+
+def main():
+    
+    args = parse_args()
+    set_seed(args.seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint = str(args.seed) + CHECKPOINT_PATH
+
+    train_transform = transforms.Compose(
+        [
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
+    )
+    test_transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
+    )
+
+    full_train_dataset = datasets.CIFAR10("./data", train=True, download=True, transform=train_transform)
+    val_base_dataset = datasets.CIFAR10("./data", train=True, download=True, transform=test_transform)
+    test_dataset = datasets.CIFAR10("./data", train=False, download=True, transform=test_transform)
+
+    train_subset, val_subset = random_split(
+        full_train_dataset,
+        [len(full_train_dataset) - 5000, 5000],
+        generator=torch.Generator().manual_seed(42), # Same split always
+    )
+    val_subset = Subset(val_base_dataset, val_subset.indices)
+
+    train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True, num_workers=12)
+    val_loader = DataLoader(val_subset, batch_size=256, shuffle=False, num_workers=12)
+    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=12)
+
+    model = SLFN_CIFAR(HIDDEN_DIM, args.dropout, args.batch_norm).to(device)
+
+    optimizer = optim.AdamW(model.parameters(), lr=3e-4, weight_decay=args.weight_decay)
+    min_lr = 1e-8
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='min',
+        factor=0.5,
+        patience=16,
+        min_lr=min_lr,
+    )
+
+    best_val_loss = float("inf")
+    best_accuracy = -1.0
+    
+    for epoch in range(1, args.epochs + 1):
+        train_loss = train(model, device, train_loader, optimizer, epoch, args.np_reg_lambda, args.o_reg_lambda)
+
+        print(f"Epoch {epoch}: Train loss {train_loss:.6f}")
+        val_loss, accuracy = test(model, device, val_loader)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+        if accuracy > best_accuracy:
+            best_accuracy = accuracy
+            torch.save(model.state_dict(), checkpoint)
+            print(
+                f"Saved new best model to {checkpoint} "
+                f"(epoch {epoch}, val acc {accuracy:.2f}%)"
+            )
+
+        scheduler.step(val_loss)
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"Epoch {epoch}: Learning rate {current_lr:.2e}")
+        if current_lr <= 2*min_lr:
+            print("Minimum learning rate reached. Stopping training.")
+            break
+
+    print(
+        f"Run finished with arguments: \nbatch_size={args.batch_size}\n"
+        f"np_reg_lambda={args.np_reg_lambda}\n"
+        f"o_reg_lambda={args.o_reg_lambda}\n"
+        f"weight_degay={args.weight_decay}\n"
+        f"dropout={args.dropout}\n"
+        f"batchnorm={args.batch_norm}\n"
+        f"seed={args.seed}\n"
+    )
+    print(f"Best val loss: {best_val_loss:.6f}")
+    print(f"Best val accuracy: {best_accuracy:.2f}%")
+
+    best_model_state_dict = torch.load(checkpoint, map_location=device, weights_only=True)
+    model.load_state_dict(best_model_state_dict)
+    print(
+        f"Loaded best model from {checkpoint} "
+        f"(val acc {best_accuracy:.2f}%)"
+    )
+
+    test_loss, test_accuracy = test(model, device, test_loader, split_name="Test")
+    print(f"Final test loss: {test_loss:.6f}")
+    print(f"Final test accuracy: {test_accuracy:.2f}%")
+
+
+if __name__ == "__main__":
+    main()
