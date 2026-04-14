@@ -1,5 +1,7 @@
 import argparse
 from collections import Counter
+import os
+import tempfile
 
 import torch
 import torch.nn as nn
@@ -200,6 +202,9 @@ def main():
     best_val_loss = float("inf")
     epochs_without_loss_improvement = 0
     early_stop_patience = 8
+    saved_checkpoint = False
+    fd, save_path = tempfile.mkstemp(prefix="bow_mlp_imdb_", suffix=".pt")
+    os.close(fd)
     print(f"Using device: {device}")
     print(f"BoW vocab size: {vocab_size}")
 
@@ -239,24 +244,29 @@ def main():
             print("Validation loss has not improved for 8 epochs. Stopping training.")
             break
 
-        save_path = "models/bow_mlp_imdb.pt"
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), save_path)
+            saved_checkpoint = True
             print(f"Saved new best model to {save_path}")
 
-    checkpoint = torch.load(save_path, map_location=device, weights_only=True)
-    model.load_state_dict(checkpoint)
+    try:
+        if saved_checkpoint:
+            checkpoint = torch.load(save_path, map_location=device, weights_only=True)
+            model.load_state_dict(checkpoint)
 
-    test_loss, test_acc = test(
-        model,
-        test_loader,
-        criterion,
-        device,
-        args.o_reg_lambda,
-        args.np_reg_lambda,
-    )
-    print(f"Test loss={test_loss:.4f} | Test accuracy={test_acc * 100:.2f}%")
+        test_loss, test_acc = test(
+            model,
+            test_loader,
+            criterion,
+            device,
+            args.o_reg_lambda,
+            args.np_reg_lambda,
+        )
+        print(f"Test loss={test_loss:.4f} | Test accuracy={test_acc * 100:.2f}%")
+    finally:
+        if os.path.exists(save_path):
+            os.remove(save_path)
 
 
 if __name__ == "__main__":
