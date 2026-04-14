@@ -134,9 +134,12 @@ def train(model, dataloader, criterion, optimizer, device, o_reg_lambda, np_reg_
         optimizer.zero_grad(set_to_none=True)
 
         logits, features, bow_embedding = model(bow_embedding=bow_embedding)
-        npreg = normperserving_regularization(bow_embedding, features, np_reg_lambda)
-        oreg = orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
-        loss = criterion(logits, labels) + npreg + oreg
+        loss = criterion(logits, labels)
+
+        if np_reg_lambda > 0:
+            loss = loss + normperserving_regularization(bow_embedding, features, np_reg_lambda)
+        if o_reg_lambda > 0:
+            loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
 
         loss.backward()
         optimizer.step()
@@ -163,9 +166,7 @@ def test(model, dataloader, criterion, device, o_reg_lambda, np_reg_lambda):
 
         with torch.no_grad():
             logits, features, bow_embedding = model(bow_embedding=bow_embedding)
-            npreg = normperserving_regularization(bow_embedding, features, np_reg_lambda)
-            oreg = orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
-            loss = criterion(logits, labels) # + npreg + oreg
+            loss = criterion(logits, labels) 
 
         total_loss += loss.item() * labels.size(0)
         predictions = logits.argmax(dim=1)
@@ -189,6 +190,8 @@ def main():
         mlp_dropout=args.dropout,
         use_batch_norm=args.batch_norm,
     ).to(device)
+
+    model = torch.compile(model)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
