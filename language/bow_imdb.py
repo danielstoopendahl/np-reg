@@ -18,9 +18,6 @@ def parser():
     parser.add_argument("--hidden-dim", type=int, default=1024)
     parser.add_argument("--dropout", type=float, default=0)
     parser.add_argument("--weight-decay", type=float, default=0)
-    parser.add_argument("--scheduler-factor", type=float, default=0.5)
-    parser.add_argument("--scheduler-patience", type=int, default=16)
-    parser.add_argument("--min-lr", type=float, default=1e-8)
     parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--batch-norm", action="store_true", default=False)
@@ -210,15 +207,11 @@ def main():
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=args.scheduler_factor,
-        patience=args.scheduler_patience,
-        min_lr=args.min_lr,
-    )
 
     best_val_acc = -1.0
+    best_val_loss = float("inf")
+    epochs_without_loss_improvement = 0
+    early_stop_patience = 8
     print(f"Using device: {device}")
     print(f"BoW vocab size: {vocab_size}")
 
@@ -248,11 +241,14 @@ def main():
             f"lr={optimizer.param_groups[0]['lr']:.6e}"
         )
 
-        scheduler.step(val_loss)
-        current_lr = optimizer.param_groups[0]["lr"]
-        print(f"Epoch {epoch}: Learning rate {current_lr:.2e}")
-        if current_lr <= 2 * args.min_lr:
-            print("Minimum learning rate reached. Stopping training.")
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_without_loss_improvement = 0
+        else:
+            epochs_without_loss_improvement += 1
+
+        if epochs_without_loss_improvement >= early_stop_patience:
+            print("Validation loss has not improved for 8 epochs. Stopping training.")
             break
 
         if val_acc > best_val_acc:
