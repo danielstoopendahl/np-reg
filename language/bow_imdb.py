@@ -5,15 +5,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from datasets import load_dataset
-from torch.utils.data import DataLoader, TensorDataset
-
-# 0.2753 lr=1e-4, 1024 batch size
-
 
 def parser():
     parser = argparse.ArgumentParser(description="BoW embedder + MLP for IMDB sentiment")
     parser.add_argument("--batch-size", type=int, default=1024)
-    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--hidden-dim", type=int, default=1024)
     parser.add_argument("--dropout", type=float, default=0)
@@ -21,10 +16,6 @@ def parser():
     parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--batch-norm", action="store_true", default=False)
-    parser.add_argument("--max-vocab-size", type=int, default=20000)
-    parser.add_argument("--min-freq", type=int, default=2)
-    parser.add_argument("--binary-bow", action="store_true", default=False)
-    parser.add_argument("--save-path", type=str, default="models/bow_mlp_imdb.pt")
     return parser.parse_args()
 
 
@@ -72,7 +63,7 @@ def tokenize_text(text: str):
     return text.lower().split()
 
 
-def build_vocab(texts, max_vocab_size: int, min_freq: int):
+def build_vocab(texts, max_vocab_size: int=20000, min_freq: int=2):
     counter = Counter()
     for text in texts:
         counter.update(tokenize_text(text))
@@ -84,7 +75,7 @@ def build_vocab(texts, max_vocab_size: int, min_freq: int):
     return {token: idx for idx, token in enumerate(vocab_tokens)}
 
 
-def vectorize_text(text: str, vocab: dict, binary_bow: bool):
+def vectorize_text(text: str, vocab: dict):
     tokens = tokenize_text(text)
     indices = [vocab[token] for token in tokens if token in vocab]
 
@@ -94,19 +85,18 @@ def vectorize_text(text: str, vocab: dict, binary_bow: bool):
 
     index_tensor = torch.tensor(indices, dtype=torch.long)
     counts = torch.bincount(index_tensor, minlength=len(vocab)).float()
-    if binary_bow:
-        counts = counts.clamp(max=1.0)
+
     return counts
 
 
-def encode_split(dataset_split, vocab: dict, binary_bow: bool):
-    embeddings = [vectorize_text(text, vocab, binary_bow) for text in dataset_split["text"]]
+def encode_split(dataset_split, vocab: dict):
+    embeddings = [vectorize_text(text, vocab) for text in dataset_split["text"]]
     labels = torch.tensor(dataset_split["label"], dtype=torch.long)
     features = torch.stack(embeddings, dim=0)
-    return TensorDataset(features, labels)
+    return features, labels
 
 
-def build_dataloaders_from_bow(batch_size: int, max_vocab_size: int, min_freq: int, binary_bow: bool):
+def build_tensor_splits_from_bow(device: torch.device):
     dataset = load_dataset("imdb")
     split = dataset["train"].train_test_split(test_size=0.2, seed=42)
     train_split = split["train"]
@@ -114,75 +104,82 @@ def build_dataloaders_from_bow(batch_size: int, max_vocab_size: int, min_freq: i
     test_split = dataset["test"]
 
     vocab = build_vocab(
-        texts=train_split["text"],
-        max_vocab_size=max_vocab_size,
-        min_freq=min_freq,
+        texts=train_split["text"]
     )
 
-    train_dataset = encode_split(train_split, vocab, binary_bow)
-    val_dataset = encode_split(val_split, vocab, binary_bow)
-    test_dataset = encode_split(test_split, vocab, binary_bow)
+    train_embeddings, train_labels = encode_split(train_split, vocab)
+    val_embeddings, val_labels = encode_split(val_split, vocab)
+    test_embeddings, test_labels = encode_split(test_split, vocab)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    train_embeddings = train_embeddings.to(device, non_blocking=True)
+    train_labels = train_labels.to(device, non_blocking=True)
+    val_embeddings = val_embeddings.to(device, non_blocking=True)
+    val_labels = val_labels.to(device, non_blocking=True)
+    test_embeddings = test_embeddings.to(device, non_blocking=True)
+    test_labels = test_labels.to(device, non_blocking=True)
 
-    return train_loader, val_loader, test_loader, len(vocab)
+    return (
+        train_embeddings,
+        train_labels,
+        val_embeddings,
+        val_labels,
+        test_embeddings,
+        test_labels,
+        len(vocab),
+    )
 
 
-def train(model, dataloader, criterion, optimizer, device, o_reg_lambda, np_reg_lambda):
+def train(model, embeddings, labels, batch_size, criterion, optimizer, o_reg_lambda, np_reg_lambda):
     model.train()
 
     total_loss = 0.0
     correct = 0
-    total = 0
+    total = labels.size(0)
+    permutation = torch.randperm(total, device=embeddings.device)
 
-    for batch in dataloader:
-        bow_embedding, labels = batch
-        bow_embedding = bow_embedding.to(device)
-        labels = labels.to(device)
+    for start_idx in range(0, total, batch_size):
+        batch_indices = permutation[start_idx:start_idx + batch_size]
+        bow_embedding = embeddings[batch_indices]
+        batch_labels = labels[batch_indices]
 
         optimizer.zero_grad(set_to_none=True)
 
         logits, features, bow_embedding = model(bow_embedding=bow_embedding)
         npreg = normperserving_regularization(bow_embedding, features, np_reg_lambda)
         oreg = orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
-        loss = criterion(logits, labels) + npreg + oreg
+        loss = criterion(logits, batch_labels) + npreg + oreg
 
         loss.backward()
         optimizer.step()
 
-        total_loss += loss.item() * labels.size(0)
+        total_loss += loss.item() * batch_labels.size(0)
         predictions = logits.argmax(dim=1)
-        correct += (predictions == labels).sum().item()
-        total += labels.size(0)
+        correct += (predictions == batch_labels).sum().item()
 
     return total_loss / total, correct / total
-# 40.73 bn
-# 39.14
 
-def test(model, dataloader, criterion, device, o_reg_lambda, np_reg_lambda):
+
+def test(model, embeddings, labels, batch_size, criterion, o_reg_lambda, np_reg_lambda):
     model.eval()
 
     total_loss = 0.0
     correct = 0
-    total = 0
+    total = labels.size(0)
 
-    for batch in dataloader:
-        bow_embedding, labels = batch
-        bow_embedding = bow_embedding.to(device)
-        labels = labels.to(device)
+    for start_idx in range(0, total, batch_size):
+        end_idx = start_idx + batch_size
+        bow_embedding = embeddings[start_idx:end_idx]
+        batch_labels = labels[start_idx:end_idx]
 
         with torch.no_grad():
             logits, features, bow_embedding = model(bow_embedding=bow_embedding)
             npreg = normperserving_regularization(bow_embedding, features, np_reg_lambda)
             oreg = orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
-            loss = criterion(logits, labels) # + npreg + oreg
+            loss = criterion(logits, batch_labels) # + npreg + oreg
 
-        total_loss += loss.item() * labels.size(0)
+        total_loss += loss.item() * batch_labels.size(0)
         predictions = logits.argmax(dim=1)
-        correct += (predictions == labels).sum().item()
-        total += labels.size(0)
+        correct += (predictions == batch_labels).sum().item()
 
     return total_loss / total, correct / total
 
@@ -191,11 +188,16 @@ def main():
     args = parser()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_loader, val_loader, test_loader, vocab_size = build_dataloaders_from_bow(
-        batch_size=args.batch_size,
-        max_vocab_size=args.max_vocab_size,
-        min_freq=args.min_freq,
-        binary_bow=args.binary_bow,
+    (
+        train_embeddings,
+        train_labels,
+        val_embeddings,
+        val_labels,
+        test_embeddings,
+        test_labels,
+        vocab_size,
+    ) = build_tensor_splits_from_bow(
+        device=device,
     )
 
     model = SLFN_IMDB(
@@ -214,28 +216,37 @@ def main():
     early_stop_patience = 8
     print(f"Using device: {device}")
     print(f"BoW vocab size: {vocab_size}")
+    print(
+        f"Loaded BoW tensors on {device}: "
+        f"train={tuple(train_embeddings.shape)}, "
+        f"val={tuple(val_embeddings.shape)}, "
+        f"test={tuple(test_embeddings.shape)}"
+    )
+    save_path = "models/bow_mlp_imdb.pt"
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(1, 301):
         train_loss, train_acc = train(
             model,
-            train_loader,
+            train_embeddings,
+            train_labels,
+            args.batch_size,
             criterion,
             optimizer,
-            device,
             args.o_reg_lambda,
             args.np_reg_lambda,
         )
         val_loss, val_acc = test(
             model,
-            val_loader,
+            val_embeddings,
+            val_labels,
+            args.batch_size,
             criterion,
-            device,
             args.o_reg_lambda,
             args.np_reg_lambda,
         )
 
         print(
-            f"Epoch {epoch}/{args.epochs} | "
+            f"Epoch {epoch}/{301} | "
             f"train_loss={train_loss:.4f} train_acc={train_acc * 100:.2f}% | "
             f"val_loss={val_loss:.4f} val_acc={val_acc * 100:.2f}% | "
             f"lr={optimizer.param_groups[0]['lr']:.6e}"
@@ -253,17 +264,18 @@ def main():
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            torch.save(model.state_dict(), args.save_path)
-            print(f"Saved new best model to {args.save_path}")
+            torch.save(model.state_dict(), save_path)
+            print(f"Saved new best model to {save_path}")
 
-    checkpoint = torch.load(args.save_path, map_location=device, weights_only=True)
+    checkpoint = torch.load(save_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint)
 
     test_loss, test_acc = test(
         model,
-        test_loader,
+        test_embeddings,
+        test_labels,
+        args.batch_size,
         criterion,
-        device,
         args.o_reg_lambda,
         args.np_reg_lambda,
     )
