@@ -156,6 +156,40 @@ def test(model, device, test_loader, split_name="Validation"):
     return test_loss, accuracy
 
 
+def evaluate_first_layer_norm_preservation(model, device, data_loader, split_name="Test"):
+    model.eval()
+    total_abs_norm_change = 0.0
+    total_signed_norm_change = 0.0
+    total_samples = 0
+
+    with torch.no_grad():
+        for data, _ in data_loader:
+            data = data.to(device)
+            flat_input = torch.flatten(data, 1)
+            first_layer_output = model.first_linear(flat_input)
+
+            input_norm = torch.norm(flat_input, p=2, dim=1)
+            output_norm = torch.norm(first_layer_output, p=2, dim=1)
+            norm_change = output_norm - input_norm
+
+            total_abs_norm_change += norm_change.abs().sum().item()
+            total_signed_norm_change += norm_change.sum().item()
+            total_samples += data.size(0)
+
+    avg_abs_norm_change = total_abs_norm_change / total_samples
+    avg_signed_norm_change = total_signed_norm_change / total_samples
+
+    print(
+        f"{split_name} set: Average first-layer absolute norm change: {avg_abs_norm_change:.6f}"
+    )
+    print(
+        f"{split_name} set: Average first-layer signed norm change (output - input): "
+        f"{avg_signed_norm_change:.6f}"
+    )
+
+    return avg_abs_norm_change, avg_signed_norm_change
+
+
 
 def main():
     
@@ -250,6 +284,8 @@ def main():
         f"Loaded best model from {checkpoint} "
         f"(val acc {best_accuracy:.2f}%)"
     )
+
+    evaluate_first_layer_norm_preservation(model, device, test_loader, split_name="Test")
 
     test_loss, test_accuracy = test(model, device, test_loader, split_name="Test")
     print(f"Final test loss: {test_loss:.6f}")
