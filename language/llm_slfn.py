@@ -5,14 +5,17 @@ from collections import Counter
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 
 
 def parse_args():
 	parser = argparse.ArgumentParser(
 		description="Simple NPLM (fixed-window feed-forward language model)."
 	)
-	parser.add_argument("--text-path", type=str, required=True)
+	parser.add_argument("--text-path", type=str, default=None)
+	parser.add_argument("--train-path", type=str, default=None)
+	parser.add_argument("--valid-path", type=str, default=None)
+	parser.add_argument("--test-path", type=str, default=None)
 	parser.add_argument("--context-size", type=int, default=15)
 	parser.add_argument("--embed-dim", type=int, default=128)
 	parser.add_argument("--hidden-dim", type=int, default=512)
@@ -27,7 +30,13 @@ def parse_args():
 	parser.add_argument("--max-vocab", type=int, default=30000)
 	parser.add_argument("--min-freq", type=int, default=2)
 	parser.add_argument("--seed", type=int, default=42)
-	return parser.parse_args()
+	args = parser.parse_args()
+
+	has_official_split = all([args.train_path, args.valid_path, args.test_path])
+	if not has_official_split and args.text_path is None:
+		parser.error("Provide either --text-path or all of --train-path/--valid-path/--test-path.")
+
+	return args
 
 
 def set_seed(seed: int):
@@ -39,6 +48,11 @@ def set_seed(seed: int):
 
 def tokenize(text: str):
 	return text.lower().split()
+
+
+def read_tokens(path: str):
+	with open(path, "r", encoding="utf-8") as f:
+		return tokenize(f.read())
 
 
 def split_tokens(tokens, train_ratio=0.8, val_ratio=0.1):
@@ -235,14 +249,23 @@ def run_epoch(model, loader, criterion, optimizer, device):
 
 
 def build_loaders(args):
-	with open(args.text_path, "r", encoding="utf-8") as f:
-		text = f.read()
+	has_official_split = all([args.train_path, args.valid_path, args.test_path])
+	if has_official_split:
+		train_tokens = read_tokens(args.train_path)
+		val_tokens = read_tokens(args.valid_path)
+		test_tokens = read_tokens(args.test_path)
+	else:
+		tokens = read_tokens(args.text_path)
+		if len(tokens) < 100:
+			raise ValueError("Input text is too small. Provide a larger corpus.")
+		train_tokens, val_tokens, test_tokens = split_tokens(tokens)
 
-	tokens = tokenize(text)
-	if len(tokens) < 100:
-		raise ValueError("Input text is too small. Provide a larger corpus.")
-
-	train_tokens, val_tokens, test_tokens = split_tokens(tokens)
+	if len(train_tokens) <= args.context_size:
+		raise ValueError("Training split is too small for the selected context size.")
+	if len(val_tokens) <= args.context_size:
+		raise ValueError("Validation split is too small for the selected context size.")
+	if len(test_tokens) <= args.context_size:
+		raise ValueError("Test split is too small for the selected context size.")
 	tok2idx, idx2tok = build_vocab(
 		train_tokens,
 		max_vocab=args.max_vocab,
@@ -319,6 +342,10 @@ def main():
 	print(f"Context size: {args.context_size}")
 	print(f"Layers: {args.num_layers}")
 	print(f"Global context: {args.global_context}")
+	if all([args.train_path, args.valid_path, args.test_path]):
+		print("Data mode: official train/valid/test files")
+	else:
+		print("Data mode: single file with internal 80/10/10 split")
 
 	for epoch in range(1, args.epochs + 1):
 		train_loss, train_ppl = run_epoch(model, train_loader, criterion, optimizer, device)
