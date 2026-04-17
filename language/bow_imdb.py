@@ -8,6 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from datasets import load_dataset
 from torch.utils.data import DataLoader, TensorDataset
+import random
+
 
 def parser():
     parser = argparse.ArgumentParser(description="BoW embedder + MLP for IMDB sentiment")
@@ -19,8 +21,19 @@ def parser():
     parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--batch-norm", action="store_true", default=False)
+    parser.add_argument("--seed", type=int, default=None)
+
     return parser.parse_args()
 
+def set_seed(seed):
+    if seed is None:
+        return
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def normperserving_regularization(data, features, reg_lambda):
     data_norm = torch.norm(data.view(data.size(0), -1), p="fro", dim=1)
@@ -46,7 +59,7 @@ class SLFN_IMDB(nn.Module):
         self.second_linear = nn.Linear(hidden_dim, num_classes)
         self.dropout = nn.Dropout(mlp_dropout)
         self.use_batch_norm = use_batch_norm
-        self.batch_norm = nn.BatchNorm1d(hidden_dim)
+        self.batch_norm = nn.LayerNorm(hidden_dim)
 
     def forward_features(self, bow_embedding: torch.Tensor):
         features = self.first_linear(bow_embedding)
@@ -66,7 +79,7 @@ def tokenize_text(text: str):
     return text.lower().split()
 
 
-def build_vocab(texts, max_vocab_size: int=20000, min_freq: int=2):
+def build_vocab(texts, max_vocab_size: int=10000, min_freq: int=2):
     counter = Counter()
     for text in texts:
         counter.update(tokenize_text(text))
@@ -179,7 +192,9 @@ def test(model, dataloader, criterion, device, o_reg_lambda, np_reg_lambda):
 
 
 def main():
+    torch.set_float32_matmul_precision('high')
     args = parser()
+    set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_loader, val_loader, test_loader, vocab_size = build_dataloaders_from_bow(
@@ -208,7 +223,7 @@ def main():
     print(f"Using device: {device}")
     print(f"BoW vocab size: {vocab_size}")
 
-    for epoch in range(1, 301):
+    for epoch in range(1, 401):
         train_loss, train_acc = train(
             model,
             train_loader,
