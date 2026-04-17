@@ -1,0 +1,10 @@
+weight_decay,batch_size,learning_rate,best_val_loss,best_val_acc_percent,status,log_file
+1e-3,32,3e-6,0.266000,89.620000,ok,language/grid_results_wd_1e3/logs/run_1_wd_1em3_bs_32_lr_3em6.log
+1e-3,32,1e-5,0.267800,89.620000,ok,language/grid_results_wd_1e3/logs/run_2_wd_1em3_bs_32_lr_1em5.log
+1e-3,32,3e-5,0.269200,89.620000,ok,language/grid_results_wd_1e3/logs/run_3_wd_1em3_bs_32_lr_3em5.log
+1e-3,64,3e-6,0.267000,89.580000,ok,language/grid_results_wd_1e3/logs/run_4_wd_1em3_bs_64_lr_3em6.log
+1e-3,64,1e-5,,,failed,language/grid_results_wd_1e3/logs/run_5_wd_1em3_bs_64_lr_1em5.log
+1e-3,64,3e-5,0.267600,89.760000,ok,language/grid_results_wd_1e3/logs/run_6_wd_1em3_bs_64_lr_3em5.log
+1e-3,128,3e-6,0.267800,89.500000,ok,language/grid_results_wd_1e3/logs/run_7_wd_1em3_bs_128_lr_3em6.log
+1e-3,128,1e-5,0.268100,89.440000,ok,language/grid_results_wd_1e3/logs/run_8_wd_1em3_bs_128_lr_1em5.log
+1e-3,128,3e-5,0.267500,89.540000,ok,language/grid_results_wd_1e3/logs/run_9_wd_1em3_bs_128_lr_3em5.log

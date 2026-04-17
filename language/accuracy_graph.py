@@ -2,25 +2,25 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Data
-model_sizes = [2048, 4096, 8192, 16384]
+model_sizes = [10000, 20000]
 techniques = ['Vanilla', 'Weight Decay', 'Dropout', 'Layer Norm', 'GSVD-loss', 'Ortho-loss']
 
 averages = {
-    'Vanilla': [58.57, 59.38, 59.50, 60.08],
-    'Weight Decay': [58.90, 59.77, 59.91, 60.18],
-    'Dropout': [59.73, 59.73, 59.35, 59.59],
-    'Layer Norm': [63.68, 64.16, 64.30, 65.0],
-    'GSVD-loss': [64.57, 65.38, 65.71, 66.25],
-    'Ortho-loss': [65.66, 65.14, 66.88, 67.64]
+    'Vanilla': [87.98, 88.17],
+    'Weight Decay': [88.08, 88.12],
+    'Dropout': [88.07, 88.30],
+    'Layer Norm': [87.77, 88.11],
+    'GSVD-loss': [88.30, 88.76],
+    'Ortho-loss': [87.86, 87.95]
 }
 
 se = {
-    'Vanilla': [0.09, 0.12, 0.17, 0.18],
-    'Weight Decay': [0.15, 0.18, 0.21, 0.18],
-    'Dropout': [0.22, 0.17, 0.08, 0.22],
-    'Layer Norm': [0.19, 0.22, 0.16, 0.18],
-    'GSVD-loss': [0.10, 0.13, 0.13, 0.21],
-    'Ortho-loss': [0.29, 0.18, 0.19, 0.32]
+    'Vanilla': [0.02, 0.02],
+    'Weight Decay': [0.02, 0.06],
+    'Dropout': [0.02, 0.03],
+    'Layer Norm': [0.05, 0.05],
+    'GSVD-loss': [0.03, 0.01],
+    'Ortho-loss': [0.05, 0.05]
 }
 
 # t-value for 95% CI with 4 degrees of freedom (n=5)
@@ -41,4 +41,4 @@ plt.xticks(model_sizes, [str(size) for size in model_sizes])
 plt.legend(loc='lower right')
 plt.grid(True, linestyle='--', alpha=0.7)
 plt.tight_layout()
-plt.savefig('accuracy_plot_cifar.png')
+plt.savefig('accuracy_plot_imdb.png')

@@ -1,0 +1,10 @@
+dropout,batch_size,learning_rate,best_val_loss,best_val_acc_percent,status,log_file
+0.5,32,3e-6,0.266200,89.660000,ok,language/grid_results_drop_05/logs/run_1_dropout_0p5_bs_32_lr_3em6.log
+0.5,32,1e-5,,,failed,language/grid_results_drop_05/logs/run_2_dropout_0p5_bs_32_lr_1em5.log
+0.5,32,3e-5,0.267800,89.720000,ok,language/grid_results_drop_05/logs/run_3_dropout_0p5_bs_32_lr_3em5.log
+0.5,64,3e-6,0.266800,89.720000,ok,language/grid_results_drop_05/logs/run_4_dropout_0p5_bs_64_lr_3em6.log
+0.5,64,1e-5,0.267400,89.680000,ok,language/grid_results_drop_05/logs/run_5_dropout_0p5_bs_64_lr_1em5.log
+0.5,64,3e-5,0.269300,89.620000,ok,language/grid_results_drop_05/logs/run_6_dropout_0p5_bs_64_lr_3em5.log
+0.5,128,3e-6,0.266800,89.600000,ok,language/grid_results_drop_05/logs/run_7_dropout_0p5_bs_128_lr_3em6.log
+0.5,128,1e-5,0.267300,89.660000,ok,language/grid_results_drop_05/logs/run_8_dropout_0p5_bs_128_lr_1em5.log
+0.5,128,3e-5,0.269500,89.700000,ok,language/grid_results_drop_05/logs/run_9_dropout_0p5_bs_128_lr_3em5.log
