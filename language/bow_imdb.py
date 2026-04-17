@@ -154,7 +154,7 @@ def train(model, dataloader, criterion, optimizer, device, o_reg_lambda, np_reg_
     return total_loss / total, correct / total
 
 
-def test(model, dataloader, criterion, device, o_reg_lambda, np_reg_lambda):
+def test(model, dataloader, criterion, device):
     model.eval()
 
     total_loss = 0.0
@@ -223,8 +223,6 @@ def main():
             val_loader,
             criterion,
             device,
-            args.o_reg_lambda,
-            args.np_reg_lambda,
         )
 
         print(
@@ -260,8 +258,6 @@ def main():
             test_loader,
             criterion,
             device,
-            args.o_reg_lambda,
-            args.np_reg_lambda,
         )
         print(f"Test loss={test_loss:.4f} | Test accuracy={test_acc * 100:.2f}%")
     finally:
