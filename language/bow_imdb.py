@@ -13,15 +13,17 @@ import random
 
 def parser():
     parser = argparse.ArgumentParser(description="BoW embedder + MLP for IMDB sentiment")
-    parser.add_argument("--batch-size", type=int, default=1024)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--hidden-dim", type=int, default=1024)
+    parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--dropout", type=float, default=0)
     parser.add_argument("--weight-decay", type=float, default=0)
     parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--batch-norm", action="store_true", default=False)
+    parser.add_argument("--layer-norm", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--vocab-size", type=int, default=10000)
 
     return parser.parse_args()
 
@@ -50,7 +52,7 @@ def orthogonal_regularization(weight, reg_lambda):
 
 
 class SLFN_IMDB(nn.Module):
-    def __init__(self, embedding_dim: int, hidden_dim: int, mlp_dropout: float, use_batch_norm: bool):
+    def __init__(self, embedding_dim: int, hidden_dim: int, mlp_dropout: float, use_batch_norm: bool, use_layer_norm: bool):
         super().__init__()
         num_classes = 2
 
@@ -59,12 +61,16 @@ class SLFN_IMDB(nn.Module):
         self.second_linear = nn.Linear(hidden_dim, num_classes)
         self.dropout = nn.Dropout(mlp_dropout)
         self.use_batch_norm = use_batch_norm
-        self.batch_norm = nn.LayerNorm(hidden_dim)
+        self.batch_norm = nn.BatchNorm1d(hidden_dim)
+        self.use_layer_norm = use_layer_norm
+        self.layer_norm = nn.LayerNorm(hidden_dim)
 
     def forward_features(self, bow_embedding: torch.Tensor):
         features = self.first_linear(bow_embedding)
         if self.use_batch_norm:
             features = self.batch_norm(features)
+        if self.use_layer_norm:
+            features = self.layer_norm(features)
         features = self.non_linear(features)
         features = self.dropout(features)
         return features
@@ -79,7 +85,7 @@ def tokenize_text(text: str):
     return text.lower().split()
 
 
-def build_vocab(texts, max_vocab_size: int=10000, min_freq: int=2):
+def build_vocab(texts, max_vocab_size: int=80000, min_freq: int=2):
     counter = Counter()
     for text in texts:
         counter.update(tokenize_text(text))
@@ -112,7 +118,7 @@ def encode_split(dataset_split, vocab: dict):
     return TensorDataset(features, labels)
 
 
-def build_dataloaders_from_bow(batch_size: int):
+def build_dataloaders_from_bow(batch_size: int, max_vocab_size: int):
     dataset = load_dataset("imdb")
     split = dataset["train"].train_test_split(test_size=0.2, seed=42)
     train_split = split["train"]
@@ -120,7 +126,8 @@ def build_dataloaders_from_bow(batch_size: int):
     test_split = dataset["test"]
 
     vocab = build_vocab(
-        texts=train_split["text"]
+        texts=train_split["text"],
+        max_vocab_size=max_vocab_size
     )
 
     train_dataset = encode_split(train_split, vocab)
@@ -199,6 +206,7 @@ def main():
 
     train_loader, val_loader, test_loader, vocab_size = build_dataloaders_from_bow(
         batch_size=args.batch_size,
+        max_vocab_size=args.vocab_size
     )
 
     model = SLFN_IMDB(
@@ -206,6 +214,7 @@ def main():
         hidden_dim=args.hidden_dim,
         mlp_dropout=args.dropout,
         use_batch_norm=args.batch_norm,
+        use_layer_norm=args.layer_norm
     ).to(device)
 
     model = torch.compile(model)
