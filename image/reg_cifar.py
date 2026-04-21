@@ -6,31 +6,19 @@ from torchvision import datasets, transforms
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset, random_split
 
-HIDDEN_DIM = 16384 # [1024, 2048, 4096, 8192, 16384]
-BATCH_SIZE = 128 # [128, 256, 512]
-NP_REG_LAMBDA = 0 # [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1, 3, 10]
+HIDDEN_DIM = 8192 # [8, 32, 128, 512, 2048, 8192]
+BATCH_SIZE = 128 # [64, 128, 256]
+NP_REG_LAMBDA = 0 # [0.01, 0.1, 1]
 O_REG_LAMBDA = 0 # []
-L1_REG_LAMBDA = 0 # []
 WEIGHT_DECAY=0
 DROPOUT=0
 BATCH_NORM=False
-
-# python reg_cifar.py --weight-decay=1e-6 --batch-size=4096 | tee out229.txt; python reg_cifar.py --weight-decay=1e-6 --batch-size=1024 | tee out230.txt; python reg_cifar.py --weight-decay=1e-6 --batch-size=2048 | tee out231.txt; python reg_cifar.py --weight-decay=1e-4 --batch-size=4096 | tee out241.txt; python reg_cifar.py --weight-decay=1e-4 --batch-size=1024 | tee out242.txt; python reg_cifar.py --weight-decay=1e-4 --batch-size=2048 | tee out243.txt; python reg_cifar.py --dropout=0.2 --batch-size=4096 | tee out253.txt; python reg_cifar.py --dropout=0.2 --batch-size=1024 | tee out254.txt; python reg_cifar.py --dropout=0.2 --batch-size=2048 | tee out255.txt; python reg_cifar.py --o-reg-lambda=3e-1 --batch-size=256 | tee out303.txt; python reg_cifar.py --o-reg-lambda=3e-1 --batch-size=512 | tee out314.txt; python reg_cifar.py --o-reg-lambda=3 --batch-size=256 | tee out307.txt; python reg_cifar.py --o-reg-lambda=30 --batch-size=256 | tee out310.txt; 
-# python reg_cifar.py --weight-decay=3e-6 --batch-size=1024 | tee out232.txt; python reg_cifar.py --weight-decay=3e-6 --batch-size=2048 | tee out233.txt; python reg_cifar.py --weight-decay=3e-6 --batch-size=4096 | tee out234.txt; python reg_cifar.py --weight-decay=3e-4 --batch-size=4096 | tee out244.txt; python reg_cifar.py --weight-decay=3e-4 --batch-size=1024 | tee out245.txt; python reg_cifar.py --weight-decay=3e-4 --batch-size=2048 | tee out246.txt; python reg_cifar.py --dropout=0.25 --batch-size=4096 | tee out256.txt; python reg_cifar.py --dropout=0.25 --batch-size=1024 | tee out257.txt; python reg_cifar.py --dropout=0.25 --batch-size=2048 | tee out258.txt; python reg_cifar.py --o-reg-lambda=3e-1 --batch-size=1024 | tee out304.txt; python reg_cifar.py --o-reg-lambda=1 --batch-size=256 | tee out305.txt; python reg_cifar.py --o-reg-lambda=1 --batch-size=512 | tee out315.txt; python reg_cifar.py --o-reg-lambda=1 --batch-size=1024 | tee out306.txt; 
-# python reg_cifar.py --weight-decay=1e-5 --batch-size=2048 | tee out235.txt; python reg_cifar.py --weight-decay=1e-5 --batch-size=4096 | tee out236.txt; python reg_cifar.py --weight-decay=1e-5 --batch-size=1024 | tee out237.txt; python reg_cifar.py --dropout=0.1 --batch-size=4096 | tee out247.txt; python reg_cifar.py --dropout=0.1 --batch-size=1024 | tee out248.txt; python reg_cifar.py --dropout=0.1 --batch-size=2048 | tee out249.txt; python reg_cifar.py --dropout=0.3 --batch-size=4096 | tee out259.txt; python reg_cifar.py --dropout=0.3 --batch-size=1024 | tee out260.txt; python reg_cifar.py --dropout=0.3 --batch-size=2048 | tee out261.txt; python reg_cifar.py --o-reg-lambda=3 --batch-size=512 | tee out317.txt; python reg_cifar.py --o-reg-lambda=3 --batch-size=1024 | tee out308.txt; python reg_cifar.py --o-reg-lambda=10 --batch-size=256 | tee out309.txt; python reg_cifar.py --o-reg-lambda=10 --batch-size=1024 | tee out319.txt; python reg_cifar.py --o-reg-lambda=10 --batch-size=512 | tee out318.txt; 
-# python reg_cifar.py --weight-decay=3e-5 --batch-size=4096 | tee out238.txt; python reg_cifar.py --weight-decay=3e-5 --batch-size=1024 | tee out239.txt; python reg_cifar.py --weight-decay=3e-5 --batch-size=2048 | tee out240.txt; python reg_cifar.py --dropout=0.15 --batch-size=4096 | tee out250.txt; python reg_cifar.py --dropout=0.15 --batch-size=1024 | tee out251.txt; python reg_cifar.py --dropout=0.15 --batch-size=2048 | tee out252.txt; python reg_cifar.py --dropout=0.05 --batch-size=4096 | tee out262.txt; python reg_cifar.py --dropout=0.05 --batch-size=1024 | tee out263.txt; python reg_cifar.py --dropout=0.05 --batch-size=2048 | tee out264.txt; python reg_cifar.py --o-reg-lambda=30 --batch-size=512 | tee out320.txt; python reg_cifar.py --o-reg-lambda=30 --batch-size=1024 | tee out311.txt; python reg_cifar.py --o-reg-lambda=100 --batch-size=256 | tee out312.txt; python reg_cifar.py --o-reg-lambda=100 --batch-size=512 | tee out323.txt; python reg_cifar.py --o-reg-lambda=100 --batch-size=1024 | tee out313.txt;
-
-# python reg_cifar.py --np-reg-lambda=1e-2 --batch-size=128 | tee out401.txt; python reg_cifar.py --np-reg-lambda=1e-2 --batch-size=256 | tee out402.txt; python reg_cifar.py --np-reg-lambda=1e-2 --batch-size=512 | tee out403.txt; python reg_cifar.py --np-reg-lambda=3e-2 --batch-size=128 | tee out404.txt; python reg_cifar.py --np-reg-lambda=3e-2 --batch-size=256 | tee out405.txt; python reg_cifar.py --np-reg-lambda=3e-2 --batch-size=512 | tee out406.txt;
-# python reg_cifar.py --np-reg-lambda=1e-1 --batch-size=128 | tee out407.txt; python reg_cifar.py --np-reg-lambda=1e-1 --batch-size=256 | tee out408.txt; python reg_cifar.py --np-reg-lambda=1e-1 --batch-size=512 | tee out409.txt; python reg_cifar.py --np-reg-lambda=3e-1 --batch-size=128 | tee out410.txt; python reg_cifar.py --np-reg-lambda=3e-1 --batch-size=256 | tee out411.txt; python reg_cifar.py --np-reg-lambda=3e-1 --batch-size=512 | tee out412.txt;
-# python reg_cifar.py --np-reg-lambda=1 --batch-size=128 | tee out413.txt; python reg_cifar.py --np-reg-lambda=1 --batch-size=256 | tee out414.txt; python reg_cifar.py --np-reg-lambda=1 --batch-size=512 | tee out415.txt; python reg_cifar.py --np-reg-lambda=3 --batch-size=128 | tee out416.txt; python reg_cifar.py --np-reg-lambda=3 --batch-size=256 | tee out417.txt; python reg_cifar.py --np-reg-lambda=3 --batch-size=512 | tee out418.txt;
-
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--np-reg-lambda", type=float, default=NP_REG_LAMBDA)
     parser.add_argument("--o-reg-lambda", type=float, default=O_REG_LAMBDA)
-    parser.add_argument("--l1-reg-lambda", type=float, default=L1_REG_LAMBDA)
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY)
     parser.add_argument("--dropout", type=float, default=DROPOUT)
     parser.add_argument("--batch-norm", action="store_true", default=BATCH_NORM)
@@ -59,15 +47,6 @@ def orthogonal_regularization(weight, o_reg_lambda):
     loss_ortho = torch.norm(sym - identity, p='fro')**2
     
     return o_reg_lambda * loss_ortho
-
-
-def l1_regularization(model, l1_reg_lambda):
-    """
-    Computes the L1 (lasso) regularization penalty over all trainable parameters.
-    """
-
-    l1_norm = sum(param.abs().sum() for param in model.parameters())
-    return l1_reg_lambda * l1_norm
 
 
 class SLFN_CIFAR(nn.Module):
@@ -99,7 +78,7 @@ class SLFN_CIFAR(nn.Module):
         return x
 
 
-def train(model, device, train_loader, optimizer, epoch, np_reg_lambda, o_reg_lambda, l1_reg_lambda):
+def train(model, device, train_loader, optimizer, epoch, np_reg_lambda, o_reg_lambda):
     model.train()
     running_loss = 0.0
 
@@ -111,10 +90,9 @@ def train(model, device, train_loader, optimizer, epoch, np_reg_lambda, o_reg_la
         features = model.forward_features(data)
         normperserving_loss = normperserving_regularization(data, features, np_reg_lambda)
         orthogonal_loss = orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
-        lasso_loss = l1_regularization(model, l1_reg_lambda)
         
         logits = model.second_linear(features)
-        loss = F.cross_entropy(logits, target) + normperserving_loss + orthogonal_loss + lasso_loss
+        loss = F.cross_entropy(logits, target) + normperserving_loss + orthogonal_loss
         loss.backward()
         optimizer.step()
 
@@ -207,7 +185,6 @@ def main():
             epoch,
             args.np_reg_lambda,
             args.o_reg_lambda,
-            args.l1_reg_lambda,
         )
 
         print(f"Epoch {epoch}: Train loss {train_loss:.6f}")
@@ -229,7 +206,6 @@ def main():
         f"Run finished with arguments: \nbatch_size={args.batch_size}\n"
         f"np_reg_lambda={args.np_reg_lambda}\n"
         f"o_reg_lambda={args.o_reg_lambda}\n"
-        f"l1_reg_lambda={args.l1_reg_lambda}\n"
         f"weight_degay={args.weight_decay}\n"
         f"dropout={args.dropout}\n"
         f"batchnorm={args.batch_norm}\n"
