@@ -7,8 +7,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from datasets import load_dataset
+from datasets import load_from_disk
 from torch.utils.data import DataLoader, TensorDataset
 import random
+
+
+DEFAULT_DATASET_PATH = os.path.join(os.path.dirname(__file__), "data", "imdb_hf")
 
 
 def parser():
@@ -24,6 +28,7 @@ def parser():
     parser.add_argument("--layer-norm", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--vocab-size", type=int, default=10000)
+    parser.add_argument("--dataset-path", type=str, default=DEFAULT_DATASET_PATH)
 
     return parser.parse_args()
 
@@ -118,8 +123,21 @@ def encode_split(dataset_split, vocab: dict):
     return TensorDataset(features, labels)
 
 
-def build_dataloaders_from_bow(batch_size: int, max_vocab_size: int):
+def get_imdb_dataset(local_dataset_path: str):
+    if os.path.isdir(local_dataset_path):
+        print(f"Loading IMDb dataset from local disk: {local_dataset_path}")
+        return load_from_disk(local_dataset_path)
+
+    print("Local IMDb dataset not found. Downloading once from HF Hub...")
     dataset = load_dataset("imdb")
+    os.makedirs(os.path.dirname(local_dataset_path), exist_ok=True)
+    dataset.save_to_disk(local_dataset_path)
+    print(f"Saved IMDb dataset locally to: {local_dataset_path}")
+    return dataset
+
+
+def build_dataloaders_from_bow(batch_size: int, max_vocab_size: int, dataset_path: str):
+    dataset = get_imdb_dataset(local_dataset_path=dataset_path)
     split = dataset["train"].train_test_split(test_size=0.2, seed=42)
     train_split = split["train"]
     val_split = split["test"]
@@ -206,7 +224,8 @@ def main():
 
     train_loader, val_loader, test_loader, vocab_size = build_dataloaders_from_bow(
         batch_size=args.batch_size,
-        max_vocab_size=args.vocab_size
+        max_vocab_size=args.vocab_size,
+        dataset_path=args.dataset_path,
     )
 
     model = SLFN_IMDB(
