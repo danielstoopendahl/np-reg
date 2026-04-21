@@ -1,4 +1,5 @@
 import argparse
+import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -6,7 +7,7 @@ from torchvision import datasets, transforms
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset, random_split
 
-HIDDEN_DIM = 16384 # [1024, 2048, 4096, 8192, 16384]
+HIDDEN_DIM = 8192 # [1024, 2048, 4096, 8192, 16384]
 BATCH_SIZE = 128 # [128, 256, 512]
 NP_REG_LAMBDA = 0 # [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1, 3, 10]
 O_REG_LAMBDA = 0 # []
@@ -14,27 +15,35 @@ L1_REG_LAMBDA = 0 # []
 WEIGHT_DECAY=0
 DROPOUT=0
 BATCH_NORM=False
+LEARNING_RATE=3e-4
 
-# python reg_cifar.py --weight-decay=1e-6 --batch-size=4096 | tee out229.txt; python reg_cifar.py --weight-decay=1e-6 --batch-size=1024 | tee out230.txt; python reg_cifar.py --weight-decay=1e-6 --batch-size=2048 | tee out231.txt; python reg_cifar.py --weight-decay=1e-4 --batch-size=4096 | tee out241.txt; python reg_cifar.py --weight-decay=1e-4 --batch-size=1024 | tee out242.txt; python reg_cifar.py --weight-decay=1e-4 --batch-size=2048 | tee out243.txt; python reg_cifar.py --dropout=0.2 --batch-size=4096 | tee out253.txt; python reg_cifar.py --dropout=0.2 --batch-size=1024 | tee out254.txt; python reg_cifar.py --dropout=0.2 --batch-size=2048 | tee out255.txt; python reg_cifar.py --o-reg-lambda=3e-1 --batch-size=256 | tee out303.txt; python reg_cifar.py --o-reg-lambda=3e-1 --batch-size=512 | tee out314.txt; python reg_cifar.py --o-reg-lambda=3 --batch-size=256 | tee out307.txt; python reg_cifar.py --o-reg-lambda=30 --batch-size=256 | tee out310.txt; 
-# python reg_cifar.py --weight-decay=3e-6 --batch-size=1024 | tee out232.txt; python reg_cifar.py --weight-decay=3e-6 --batch-size=2048 | tee out233.txt; python reg_cifar.py --weight-decay=3e-6 --batch-size=4096 | tee out234.txt; python reg_cifar.py --weight-decay=3e-4 --batch-size=4096 | tee out244.txt; python reg_cifar.py --weight-decay=3e-4 --batch-size=1024 | tee out245.txt; python reg_cifar.py --weight-decay=3e-4 --batch-size=2048 | tee out246.txt; python reg_cifar.py --dropout=0.25 --batch-size=4096 | tee out256.txt; python reg_cifar.py --dropout=0.25 --batch-size=1024 | tee out257.txt; python reg_cifar.py --dropout=0.25 --batch-size=2048 | tee out258.txt; python reg_cifar.py --o-reg-lambda=3e-1 --batch-size=1024 | tee out304.txt; python reg_cifar.py --o-reg-lambda=1 --batch-size=256 | tee out305.txt; python reg_cifar.py --o-reg-lambda=1 --batch-size=512 | tee out315.txt; python reg_cifar.py --o-reg-lambda=1 --batch-size=1024 | tee out306.txt; 
-# python reg_cifar.py --weight-decay=1e-5 --batch-size=2048 | tee out235.txt; python reg_cifar.py --weight-decay=1e-5 --batch-size=4096 | tee out236.txt; python reg_cifar.py --weight-decay=1e-5 --batch-size=1024 | tee out237.txt; python reg_cifar.py --dropout=0.1 --batch-size=4096 | tee out247.txt; python reg_cifar.py --dropout=0.1 --batch-size=1024 | tee out248.txt; python reg_cifar.py --dropout=0.1 --batch-size=2048 | tee out249.txt; python reg_cifar.py --dropout=0.3 --batch-size=4096 | tee out259.txt; python reg_cifar.py --dropout=0.3 --batch-size=1024 | tee out260.txt; python reg_cifar.py --dropout=0.3 --batch-size=2048 | tee out261.txt; python reg_cifar.py --o-reg-lambda=3 --batch-size=512 | tee out317.txt; python reg_cifar.py --o-reg-lambda=3 --batch-size=1024 | tee out308.txt; python reg_cifar.py --o-reg-lambda=10 --batch-size=256 | tee out309.txt; python reg_cifar.py --o-reg-lambda=10 --batch-size=1024 | tee out319.txt; python reg_cifar.py --o-reg-lambda=10 --batch-size=512 | tee out318.txt; 
-# python reg_cifar.py --weight-decay=3e-5 --batch-size=4096 | tee out238.txt; python reg_cifar.py --weight-decay=3e-5 --batch-size=1024 | tee out239.txt; python reg_cifar.py --weight-decay=3e-5 --batch-size=2048 | tee out240.txt; python reg_cifar.py --dropout=0.15 --batch-size=4096 | tee out250.txt; python reg_cifar.py --dropout=0.15 --batch-size=1024 | tee out251.txt; python reg_cifar.py --dropout=0.15 --batch-size=2048 | tee out252.txt; python reg_cifar.py --dropout=0.05 --batch-size=4096 | tee out262.txt; python reg_cifar.py --dropout=0.05 --batch-size=1024 | tee out263.txt; python reg_cifar.py --dropout=0.05 --batch-size=2048 | tee out264.txt; python reg_cifar.py --o-reg-lambda=30 --batch-size=512 | tee out320.txt; python reg_cifar.py --o-reg-lambda=30 --batch-size=1024 | tee out311.txt; python reg_cifar.py --o-reg-lambda=100 --batch-size=256 | tee out312.txt; python reg_cifar.py --o-reg-lambda=100 --batch-size=512 | tee out323.txt; python reg_cifar.py --o-reg-lambda=100 --batch-size=1024 | tee out313.txt;
-
-# python reg_cifar.py --np-reg-lambda=1e-2 --batch-size=128 | tee out401.txt; python reg_cifar.py --np-reg-lambda=1e-2 --batch-size=256 | tee out402.txt; python reg_cifar.py --np-reg-lambda=1e-2 --batch-size=512 | tee out403.txt; python reg_cifar.py --np-reg-lambda=3e-2 --batch-size=128 | tee out404.txt; python reg_cifar.py --np-reg-lambda=3e-2 --batch-size=256 | tee out405.txt; python reg_cifar.py --np-reg-lambda=3e-2 --batch-size=512 | tee out406.txt;
-# python reg_cifar.py --np-reg-lambda=1e-1 --batch-size=128 | tee out407.txt; python reg_cifar.py --np-reg-lambda=1e-1 --batch-size=256 | tee out408.txt; python reg_cifar.py --np-reg-lambda=1e-1 --batch-size=512 | tee out409.txt; python reg_cifar.py --np-reg-lambda=3e-1 --batch-size=128 | tee out410.txt; python reg_cifar.py --np-reg-lambda=3e-1 --batch-size=256 | tee out411.txt; python reg_cifar.py --np-reg-lambda=3e-1 --batch-size=512 | tee out412.txt;
-# python reg_cifar.py --np-reg-lambda=1 --batch-size=128 | tee out413.txt; python reg_cifar.py --np-reg-lambda=1 --batch-size=256 | tee out414.txt; python reg_cifar.py --np-reg-lambda=1 --batch-size=512 | tee out415.txt; python reg_cifar.py --np-reg-lambda=3 --batch-size=128 | tee out416.txt; python reg_cifar.py --np-reg-lambda=3 --batch-size=256 | tee out417.txt; python reg_cifar.py --np-reg-lambda=3 --batch-size=512 | tee out418.txt;
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--hidden-dim", type=int, default=HIDDEN_DIM)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--np-reg-lambda", type=float, default=NP_REG_LAMBDA)
     parser.add_argument("--o-reg-lambda", type=float, default=O_REG_LAMBDA)
     parser.add_argument("--l1-reg-lambda", type=float, default=L1_REG_LAMBDA)
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY)
     parser.add_argument("--dropout", type=float, default=DROPOUT)
+    parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE)
     parser.add_argument("--batch-norm", action="store_true", default=BATCH_NORM)
+    parser.add_argument("--layer-norm", action="store_true", default=False)
+    parser.add_argument("--seed", type=int, default=None)
+
     return parser.parse_args()
+
+def set_seed(seed):
+    if seed is None:
+        return
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def normperserving_regularization(data, features, np_reg_lambda):
     """
@@ -71,7 +80,7 @@ def l1_regularization(model, l1_reg_lambda):
 
 
 class SLFN_CIFAR(nn.Module):
-    def __init__(self, hidden_dim, dropout, use_batch_norm):
+    def __init__(self, hidden_dim, dropout, use_batch_norm, use_layer_norm):
         super(SLFN_CIFAR, self).__init__()
 
         input_dim = 3 * 32 * 32
@@ -83,12 +92,16 @@ class SLFN_CIFAR(nn.Module):
         self.second_linear = nn.Linear(hidden_dim, output_dim)
         self.use_batch_norm = use_batch_norm
         self.batch_norm = nn.BatchNorm1d(hidden_dim)
+        self.use_layer_norm = use_layer_norm
+        self.layer_norm = nn.LayerNorm(hidden_dim)
 
     def forward_features(self, x):
         x = torch.flatten(x, 1)
         x = self.first_linear(x)
         if self.use_batch_norm:
             x = self.batch_norm(x)
+        if self.use_layer_norm:
+            features = self.layer_norm(features)
         x = self.non_linear(x)
         x = self.drop(x)
         return x
@@ -153,6 +166,7 @@ def test(model, device, test_loader):
 
 def main():
     args = parse_args()
+    set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_transform = transforms.Compose(
@@ -183,9 +197,9 @@ def main():
     train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True, num_workers=12)
     val_loader = DataLoader(val_subset, batch_size=256, shuffle=False, num_workers=12)
 
-    model = SLFN_CIFAR(HIDDEN_DIM, args.dropout, args.batch_norm).to(device)
+    model = SLFN_CIFAR(args.hidden_dim, args.dropout, args.batch_norm, args.layer_norm).to(device)
 
-    optimizer = optim.AdamW(model.parameters(), lr=3e-4, weight_decay=args.weight_decay)
+    optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     min_lr = 1e-8
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
@@ -227,12 +241,16 @@ def main():
 
     print(
         f"Run finished with arguments: \nbatch_size={args.batch_size}\n"
+        f"hidden_dim={args.hidden_dim}\n"
         f"np_reg_lambda={args.np_reg_lambda}\n"
         f"o_reg_lambda={args.o_reg_lambda}\n"
         f"l1_reg_lambda={args.l1_reg_lambda}\n"
         f"weight_degay={args.weight_decay}\n"
         f"dropout={args.dropout}\n"
         f"batchnorm={args.batch_norm}\n"
+        f"layernorm={args.layer_norm}\n"
+        f"learning_rate={args.learning_rate}\n"
+        f"seed={args.seed}\n"
     )
     print(f"Best val loss: {best_val_loss:.6f}")
     print(f"Best val accuracy: {best_accuracy:.2f}%")
