@@ -86,4 +86,4 @@ def prepare_dataset(processed_path, data_url):
     print(f"Saved preprocessed dataset to {processed_path}")
     return dataset
 
-prepare_dataset("tabular/data/dataset_har.pt", DEFAULT_URL)
+prepare_dataset("data/dataset_har.pt", DEFAULT_URL)
