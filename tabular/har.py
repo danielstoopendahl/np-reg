@@ -1,5 +1,4 @@
 import argparse
-import os
 import random
 
 import numpy as np
@@ -8,16 +7,18 @@ from torch import nn
 import torch.nn.functional as F
 
 
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Train an SLFN on UCI HAR")
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--hidden-dim", type=int, default=512)
-    parser.add_argument("--np-reg-lambda", type=float, default=0)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--hidden-dim", type=int, default=128)
+    parser.add_argument("--np-reg-lambda", type=float, default=0.1)
+    parser.add_argument("--o-reg-lambda", type=float, default=0)
+    parser.add_argument("--lr", type=float, default=3e-3)
     parser.add_argument("--weight-decay", type=float, default=0)
     parser.add_argument("--dropout", type=float, default=0)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--batch-norm", action="store_true", default=False)
+    parser.add_argument("--layer-norm", action="store_true", default=False)
+    parser.add_argument("--seed", type=int, default=None)
     return parser.parse_args()
 
 def set_seed(seed):
@@ -46,21 +47,34 @@ def orthogonal_regularization(weight, o_reg_lambda):
     return o_reg_lambda * loss_ortho
 
 class SLFN(nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_classes, dropout):
+    def __init__(self, input_dim, hidden_dim, num_classes, dropout, use_batch_norm, use_layer_norm):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.relu = nn.ReLU()
+        self.first_linear = nn.Linear(input_dim, hidden_dim)
+        self.non_linear = nn.ReLU()
+        self.second_linear = nn.Linear(hidden_dim, num_classes)
         self.dropout = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(hidden_dim, num_classes)
+        self.use_batch_norm = use_batch_norm
+        self.batch_norm = nn.BatchNorm1d(hidden_dim)
+        self.use_layer_norm = use_layer_norm
+        self.layer_norm = nn.LayerNorm(hidden_dim)
+
+    def forward_features(self, x):
+        features = self.first_linear(x)
+        if self.use_batch_norm:
+            features = self.batch_norm(features)
+        if self.use_layer_norm:
+            features = self.layer_norm(features)
+        features = self.non_linear(features)
+        features = self.dropout(features)
+        return features
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.dropout(x)
-        return self.fc2(x)
+        features = self.forward_features(x)
+        logits = self.second_linear(features)
+        return logits, features, x
 
 
-def train_one_epoch(model, optimizer, loss_fn, x_train, y_train, batch_size, device, np_reg_lambda):
+def train_one_epoch(model, optimizer, loss_fn, x_train, y_train, batch_size, device, np_reg_lambda, o_reg_lambda):
     model.train()
     n_samples = x_train.size(0)
     permutation = torch.randperm(n_samples, device=device)
@@ -73,9 +87,12 @@ def train_one_epoch(model, optimizer, loss_fn, x_train, y_train, batch_size, dev
         yb = y_train[idx]
 
         optimizer.zero_grad()
-        first_layer_features = model.fc1(xb)
-        logits = model.fc2(model.dropout(model.relu(first_layer_features)))
-        loss = loss_fn(logits, yb) + normperserving_regularization(xb, first_layer_features, np_reg_lambda)
+        logits, features, inputs = model(xb)
+        loss = loss_fn(logits, yb)
+        if np_reg_lambda > 0:
+            loss = loss + normperserving_regularization(inputs, features, np_reg_lambda)
+        if o_reg_lambda > 0:
+            loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
         loss.backward()
         optimizer.step()
 
@@ -88,7 +105,7 @@ def train_one_epoch(model, optimizer, loss_fn, x_train, y_train, batch_size, dev
 @torch.no_grad()
 def evaluate(model, loss_fn, x, y):
     model.eval()
-    logits = model(x)
+    logits, _, _ = model(x)
     loss = loss_fn(logits, y).item()
     preds = logits.argmax(dim=1)
     acc = (preds == y).float().mean().item()
@@ -118,16 +135,19 @@ def main():
         hidden_dim=args.hidden_dim,
         num_classes=num_classes,
         dropout=args.dropout,
+        use_batch_norm=args.batch_norm,
+        use_layer_norm=args.layer_norm,
     ).to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     loss_fn = nn.CrossEntropyLoss()
 
     best_val_acc = -1.0
+    best_val_loss = float("inf")
     best_state_dict = None
 
     print("Starting SLFN training on UCI HAR...")
-    for epoch in range(120):
+    for epoch in range(100):
         train_loss, train_acc = train_one_epoch(
             model=model,
             optimizer=optimizer,
@@ -137,15 +157,17 @@ def main():
             batch_size=args.batch_size,
             device=device,
             np_reg_lambda=args.np_reg_lambda,
+            o_reg_lambda=args.o_reg_lambda,
         )
         val_loss, val_acc = evaluate(model, loss_fn, x_val, y_val)
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+            best_val_loss = val_loss
             best_state_dict = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
         print(
-            f"Epoch {epoch + 1:03d}/120 | "
+            f"Epoch {epoch + 1:03d}/100 | "
             f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} | "
             f"val_loss={val_loss:.4f} val_acc={val_acc:.4f} | "
         )
@@ -154,7 +176,14 @@ def main():
         model.load_state_dict(best_state_dict)
 
     test_loss, test_acc = evaluate(model, loss_fn, x_test, y_test)
-    print(f"Finished training. Best val accuracy: {best_val_acc:.4f} | test_acc={test_acc:.4f}")
+    print(
+        f"Finished training. Best val accuracy: {best_val_acc:.4f} | "
+        f"best_val_loss={best_val_loss:.4f} | test_acc={test_acc:.4f}"
+    )
+    print(
+        f"RESULT best_val_acc={best_val_acc:.6f} "
+        f"best_val_loss={best_val_loss:.6f} test_acc={test_acc:.6f} test_loss={test_loss:.6f}"
+    )
 
 
 if __name__ == "__main__":
