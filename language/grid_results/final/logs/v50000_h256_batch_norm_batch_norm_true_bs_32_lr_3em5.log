@@ -1,0 +1,17 @@
+Loading IMDb dataset from local disk: /home/daniel/l/masteruppsats/np-reg/language/data/imdb_hf
+Using device: cuda
+BoW vocab size: 50000
+Epoch 1/301 | train_loss=0.4023 train_acc=82.09% | val_loss=0.2933 val_acc=89.14% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wmbnrkik.pt
+Epoch 2/301 | train_loss=0.1568 train_acc=95.43% | val_loss=0.2819 val_acc=88.48% | lr=3.000000e-05
+Epoch 3/301 | train_loss=0.0750 train_acc=98.59% | val_loss=0.2693 val_acc=88.82% | lr=3.000000e-05
+Epoch 4/301 | train_loss=0.0392 train_acc=99.45% | val_loss=0.2716 val_acc=88.72% | lr=3.000000e-05
+Epoch 5/301 | train_loss=0.0269 train_acc=99.59% | val_loss=0.2940 val_acc=88.06% | lr=3.000000e-05
+Epoch 6/301 | train_loss=0.0199 train_acc=99.72% | val_loss=0.3115 val_acc=87.76% | lr=3.000000e-05
+Epoch 7/301 | train_loss=0.0144 train_acc=99.80% | val_loss=0.3161 val_acc=88.10% | lr=3.000000e-05
+Epoch 8/301 | train_loss=0.0112 train_acc=99.84% | val_loss=0.3449 val_acc=87.28% | lr=3.000000e-05
+Epoch 9/301 | train_loss=0.0111 train_acc=99.77% | val_loss=0.4440 val_acc=85.20% | lr=3.000000e-05
+Epoch 10/301 | train_loss=0.0098 train_acc=99.86% | val_loss=0.3711 val_acc=86.84% | lr=3.000000e-05
+Epoch 11/301 | train_loss=0.0112 train_acc=99.81% | val_loss=0.4018 val_acc=86.82% | lr=3.000000e-05
+Validation loss has not improved for 8 epochs. Stopping training.
+Test loss=0.3097 | Test accuracy=87.70%

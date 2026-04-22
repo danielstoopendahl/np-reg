@@ -1,0 +1,40 @@
+Loading IMDb dataset from local disk: /home/daniel/l/masteruppsats/np-reg/language/data/imdb_hf
+Using device: cuda
+BoW vocab size: 12500
+Epoch 1/301 | train_loss=0.6362 train_acc=69.16% | val_loss=0.5584 val_acc=81.92% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 2/301 | train_loss=0.5061 train_acc=82.16% | val_loss=0.4596 val_acc=85.14% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 3/301 | train_loss=0.4239 train_acc=85.87% | val_loss=0.4034 val_acc=86.64% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 4/301 | train_loss=0.3707 train_acc=87.55% | val_loss=0.3682 val_acc=87.10% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 5/301 | train_loss=0.3340 train_acc=88.89% | val_loss=0.3404 val_acc=88.02% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 6/301 | train_loss=0.3032 train_acc=90.00% | val_loss=0.3228 val_acc=88.28% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 7/301 | train_loss=0.2804 train_acc=90.39% | val_loss=0.3123 val_acc=88.48% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 8/301 | train_loss=0.2579 train_acc=91.55% | val_loss=0.3004 val_acc=88.72% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 9/301 | train_loss=0.2421 train_acc=92.16% | val_loss=0.2918 val_acc=88.90% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 10/301 | train_loss=0.2252 train_acc=92.61% | val_loss=0.2855 val_acc=89.00% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 11/301 | train_loss=0.2120 train_acc=93.08% | val_loss=0.2812 val_acc=89.40% | lr=3.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_wv54luq9.pt
+Epoch 12/301 | train_loss=0.1986 train_acc=93.41% | val_loss=0.2784 val_acc=89.38% | lr=3.000000e-05
+Epoch 13/301 | train_loss=0.1854 train_acc=94.01% | val_loss=0.2751 val_acc=89.38% | lr=3.000000e-05
+Epoch 14/301 | train_loss=0.1750 train_acc=94.35% | val_loss=0.2733 val_acc=89.28% | lr=3.000000e-05
+Epoch 15/301 | train_loss=0.1645 train_acc=94.72% | val_loss=0.2730 val_acc=89.26% | lr=3.000000e-05
+Epoch 16/301 | train_loss=0.1549 train_acc=95.30% | val_loss=0.2723 val_acc=89.32% | lr=3.000000e-05
+Epoch 17/301 | train_loss=0.1464 train_acc=95.43% | val_loss=0.2727 val_acc=89.40% | lr=3.000000e-05
+Epoch 18/301 | train_loss=0.1372 train_acc=95.78% | val_loss=0.2737 val_acc=89.18% | lr=3.000000e-05
+Epoch 19/301 | train_loss=0.1293 train_acc=96.17% | val_loss=0.2782 val_acc=89.10% | lr=3.000000e-05
+Epoch 20/301 | train_loss=0.1230 train_acc=96.18% | val_loss=0.2769 val_acc=89.10% | lr=3.000000e-05
+Epoch 21/301 | train_loss=0.1145 train_acc=96.73% | val_loss=0.2796 val_acc=89.00% | lr=3.000000e-05
+Epoch 22/301 | train_loss=0.1078 train_acc=96.84% | val_loss=0.2829 val_acc=89.04% | lr=3.000000e-05
+Epoch 23/301 | train_loss=0.1022 train_acc=96.95% | val_loss=0.2849 val_acc=88.92% | lr=3.000000e-05
+Epoch 24/301 | train_loss=0.0949 train_acc=97.23% | val_loss=0.2893 val_acc=88.76% | lr=3.000000e-05
+Validation loss has not improved for 8 epochs. Stopping training.
+Test loss=0.2996 | Test accuracy=88.34%

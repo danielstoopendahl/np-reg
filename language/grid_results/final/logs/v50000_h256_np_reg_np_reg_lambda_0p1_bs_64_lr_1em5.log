@@ -1,0 +1,119 @@
+Loading IMDb dataset from local disk: /home/daniel/l/masteruppsats/np-reg/language/data/imdb_hf
+Using device: cuda
+BoW vocab size: 50000
+Epoch 1/301 | train_loss=69.2168 train_acc=50.03% | val_loss=0.6981 val_acc=49.88% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 2/301 | train_loss=29.1985 train_acc=51.59% | val_loss=0.6912 val_acc=53.26% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 3/301 | train_loss=11.6066 train_acc=57.25% | val_loss=0.6869 val_acc=59.14% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 4/301 | train_loss=4.9028 train_acc=63.47% | val_loss=0.6802 val_acc=67.96% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 5/301 | train_loss=2.8791 train_acc=71.81% | val_loss=0.6710 val_acc=73.98% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 6/301 | train_loss=2.3954 train_acc=76.89% | val_loss=0.6601 val_acc=77.96% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 7/301 | train_loss=2.2723 train_acc=80.81% | val_loss=0.6471 val_acc=79.12% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 8/301 | train_loss=2.2011 train_acc=82.88% | val_loss=0.6331 val_acc=80.78% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 9/301 | train_loss=2.1307 train_acc=84.34% | val_loss=0.6184 val_acc=80.90% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 10/301 | train_loss=2.0567 train_acc=85.75% | val_loss=0.6028 val_acc=82.18% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 11/301 | train_loss=1.9798 train_acc=86.20% | val_loss=0.5864 val_acc=83.94% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 12/301 | train_loss=1.9009 train_acc=86.89% | val_loss=0.5698 val_acc=85.10% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 13/301 | train_loss=1.8209 train_acc=87.51% | val_loss=0.5532 val_acc=85.44% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 14/301 | train_loss=1.7419 train_acc=87.99% | val_loss=0.5367 val_acc=85.98% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 15/301 | train_loss=1.6628 train_acc=88.48% | val_loss=0.5202 val_acc=86.46% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 16/301 | train_loss=1.5857 train_acc=89.00% | val_loss=0.5041 val_acc=86.82% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 17/301 | train_loss=1.5109 train_acc=89.45% | val_loss=0.4882 val_acc=87.06% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 18/301 | train_loss=1.4399 train_acc=89.84% | val_loss=0.4728 val_acc=87.42% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 19/301 | train_loss=1.3720 train_acc=90.31% | val_loss=0.4581 val_acc=87.74% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 20/301 | train_loss=1.3076 train_acc=90.51% | val_loss=0.4441 val_acc=87.88% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 21/301 | train_loss=1.2480 train_acc=90.98% | val_loss=0.4306 val_acc=88.02% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 22/301 | train_loss=1.1924 train_acc=91.36% | val_loss=0.4181 val_acc=88.36% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 23/301 | train_loss=1.1404 train_acc=91.59% | val_loss=0.4058 val_acc=88.26% | lr=1.000000e-05
+Epoch 24/301 | train_loss=1.0924 train_acc=91.87% | val_loss=0.3948 val_acc=88.46% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 25/301 | train_loss=1.0481 train_acc=92.11% | val_loss=0.3842 val_acc=88.46% | lr=1.000000e-05
+Epoch 26/301 | train_loss=1.0072 train_acc=92.40% | val_loss=0.3744 val_acc=88.64% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 27/301 | train_loss=0.9693 train_acc=92.60% | val_loss=0.3656 val_acc=88.88% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 28/301 | train_loss=0.9345 train_acc=92.88% | val_loss=0.3569 val_acc=88.84% | lr=1.000000e-05
+Epoch 29/301 | train_loss=0.9022 train_acc=93.17% | val_loss=0.3491 val_acc=88.86% | lr=1.000000e-05
+Epoch 30/301 | train_loss=0.8721 train_acc=93.35% | val_loss=0.3423 val_acc=89.12% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 31/301 | train_loss=0.8441 train_acc=93.58% | val_loss=0.3352 val_acc=88.88% | lr=1.000000e-05
+Epoch 32/301 | train_loss=0.8179 train_acc=93.83% | val_loss=0.3291 val_acc=89.14% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 33/301 | train_loss=0.7932 train_acc=94.06% | val_loss=0.3241 val_acc=89.36% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 34/301 | train_loss=0.7703 train_acc=94.27% | val_loss=0.3178 val_acc=89.16% | lr=1.000000e-05
+Epoch 35/301 | train_loss=0.7482 train_acc=94.49% | val_loss=0.3131 val_acc=89.40% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 36/301 | train_loss=0.7276 train_acc=94.72% | val_loss=0.3083 val_acc=89.40% | lr=1.000000e-05
+Epoch 37/301 | train_loss=0.7078 train_acc=94.86% | val_loss=0.3039 val_acc=89.26% | lr=1.000000e-05
+Epoch 38/301 | train_loss=0.6889 train_acc=95.08% | val_loss=0.3001 val_acc=89.44% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 39/301 | train_loss=0.6713 train_acc=95.32% | val_loss=0.2968 val_acc=89.56% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 40/301 | train_loss=0.6545 train_acc=95.47% | val_loss=0.2928 val_acc=89.64% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 41/301 | train_loss=0.6384 train_acc=95.63% | val_loss=0.2897 val_acc=89.68% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 42/301 | train_loss=0.6227 train_acc=95.86% | val_loss=0.2864 val_acc=89.68% | lr=1.000000e-05
+Epoch 43/301 | train_loss=0.6077 train_acc=96.05% | val_loss=0.2836 val_acc=89.76% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 44/301 | train_loss=0.5935 train_acc=96.19% | val_loss=0.2814 val_acc=89.78% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 45/301 | train_loss=0.5797 train_acc=96.37% | val_loss=0.2787 val_acc=89.84% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 46/301 | train_loss=0.5665 train_acc=96.53% | val_loss=0.2767 val_acc=89.90% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 47/301 | train_loss=0.5539 train_acc=96.73% | val_loss=0.2742 val_acc=89.90% | lr=1.000000e-05
+Epoch 48/301 | train_loss=0.5418 train_acc=96.89% | val_loss=0.2722 val_acc=89.84% | lr=1.000000e-05
+Epoch 49/301 | train_loss=0.5298 train_acc=97.00% | val_loss=0.2706 val_acc=89.92% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 50/301 | train_loss=0.5186 train_acc=97.14% | val_loss=0.2688 val_acc=89.78% | lr=1.000000e-05
+Epoch 51/301 | train_loss=0.5076 train_acc=97.25% | val_loss=0.2675 val_acc=89.94% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 52/301 | train_loss=0.4970 train_acc=97.39% | val_loss=0.2659 val_acc=89.88% | lr=1.000000e-05
+Epoch 53/301 | train_loss=0.4867 train_acc=97.53% | val_loss=0.2646 val_acc=89.94% | lr=1.000000e-05
+Epoch 54/301 | train_loss=0.4767 train_acc=97.73% | val_loss=0.2635 val_acc=89.92% | lr=1.000000e-05
+Epoch 55/301 | train_loss=0.4672 train_acc=97.82% | val_loss=0.2624 val_acc=89.96% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 56/301 | train_loss=0.4581 train_acc=97.89% | val_loss=0.2615 val_acc=89.90% | lr=1.000000e-05
+Epoch 57/301 | train_loss=0.4492 train_acc=97.98% | val_loss=0.2608 val_acc=89.74% | lr=1.000000e-05
+Epoch 58/301 | train_loss=0.4407 train_acc=98.12% | val_loss=0.2600 val_acc=90.12% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 59/301 | train_loss=0.4322 train_acc=98.17% | val_loss=0.2600 val_acc=90.08% | lr=1.000000e-05
+Epoch 60/301 | train_loss=0.4241 train_acc=98.28% | val_loss=0.2590 val_acc=90.14% | lr=1.000000e-05
+Saved new best model to /tmp/bow_mlp_imdb_sm5k6_n3.pt
+Epoch 61/301 | train_loss=0.4162 train_acc=98.38% | val_loss=0.2586 val_acc=90.08% | lr=1.000000e-05
+Epoch 62/301 | train_loss=0.4086 train_acc=98.45% | val_loss=0.2589 val_acc=90.14% | lr=1.000000e-05
+Epoch 63/301 | train_loss=0.4013 train_acc=98.58% | val_loss=0.2579 val_acc=90.08% | lr=1.000000e-05
+Epoch 64/301 | train_loss=0.3942 train_acc=98.65% | val_loss=0.2575 val_acc=89.90% | lr=1.000000e-05
+Epoch 65/301 | train_loss=0.3872 train_acc=98.74% | val_loss=0.2579 val_acc=90.12% | lr=1.000000e-05
+Epoch 66/301 | train_loss=0.3805 train_acc=98.83% | val_loss=0.2581 val_acc=90.06% | lr=1.000000e-05
+Epoch 67/301 | train_loss=0.3740 train_acc=98.89% | val_loss=0.2577 val_acc=90.02% | lr=1.000000e-05
+Epoch 68/301 | train_loss=0.3677 train_acc=98.96% | val_loss=0.2579 val_acc=90.00% | lr=1.000000e-05
+Epoch 69/301 | train_loss=0.3615 train_acc=99.02% | val_loss=0.2583 val_acc=90.06% | lr=1.000000e-05
+Epoch 70/301 | train_loss=0.3555 train_acc=99.11% | val_loss=0.2583 val_acc=89.92% | lr=1.000000e-05
+Epoch 71/301 | train_loss=0.3497 train_acc=99.16% | val_loss=0.2593 val_acc=89.92% | lr=1.000000e-05
+Epoch 72/301 | train_loss=0.3440 train_acc=99.18% | val_loss=0.2593 val_acc=89.96% | lr=1.000000e-05
+Validation loss has not improved for 8 epochs. Stopping training.
+Test loss=0.2896 | Test accuracy=88.62%
