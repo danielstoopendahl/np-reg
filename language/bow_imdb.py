@@ -244,7 +244,7 @@ def main():
     best_val_acc = -1.0
     best_val_loss = float("inf")
     epochs_without_loss_improvement = 0
-    early_stop_patience = 8
+    early_stop_patience = 16
     saved_checkpoint = False
     fd, save_path = tempfile.mkstemp(prefix="bow_mlp_imdb_", suffix=".pt")
     os.close(fd)
@@ -269,7 +269,7 @@ def main():
         )
 
         print(
-            f"Epoch {epoch}/{301} | "
+            f"Epoch {epoch}/{400} | "
             f"train_loss={train_loss:.4f} train_acc={train_acc * 100:.2f}% | "
             f"val_loss={val_loss:.4f} val_acc={val_acc * 100:.2f}% | "
             f"lr={optimizer.param_groups[0]['lr']:.6e}"
