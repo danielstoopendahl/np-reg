@@ -49,8 +49,8 @@ def normperserving_regularization(data, features, np_reg_lambda):
     Penalizes differences between the norm of input data and the norm of output features.
     """
 
-    data_norm = torch.norm(data.view(data.size(0), -1), p='fro', dim=1)
-    features_norm = torch.norm(features.view(features.size(0), -1), p='fro', dim=1)
+    data_norm = torch.norm(data.view(data.size(0), -1), p=2, dim=1)
+    features_norm = torch.norm(features.view(features.size(0), -1), p=2, dim=1)
     norm_diff_loss = F.mse_loss(data_norm, features_norm)
     
     return np_reg_lambda * norm_diff_loss
@@ -119,7 +119,7 @@ def train(model, device, train_loader, optimizer, epoch, np_reg_lambda, o_reg_la
             loss = loss + normperserving_regularization(data, features, np_reg_lambda)
         if o_reg_lambda > 0:
             loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
-            
+
         loss.backward()
         optimizer.step()
 

@@ -43,8 +43,8 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 def normperserving_regularization(data, features, reg_lambda):
-    data_norm = torch.norm(data.view(data.size(0), -1), p="fro", dim=1)
-    features_norm = torch.norm(features.view(features.size(0), -1), p="fro", dim=1)
+    data_norm = torch.norm(data.view(data.size(0), -1), p=2, dim=1)
+    features_norm = torch.norm(features.view(features.size(0), -1), p=2, dim=1)
     norm_diff_loss = F.mse_loss(data_norm, features_norm)
     return reg_lambda * norm_diff_loss
 
