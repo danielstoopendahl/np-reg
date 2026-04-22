@@ -90,7 +90,7 @@ class SLFN_CIFAR(nn.Module):
         if self.use_batch_norm:
             x = self.batch_norm(x)
         if self.use_layer_norm:
-            features = self.layer_norm(features)
+            x = self.layer_norm(x)
         x = self.non_linear(x)
         x = self.drop(x)
         return x
@@ -111,11 +111,15 @@ def train(model, device, train_loader, optimizer, epoch, np_reg_lambda, o_reg_la
         
         optimizer.zero_grad()
         features = model.forward_features(data)
-        normperserving_loss = normperserving_regularization(data, features, np_reg_lambda)
-        orthogonal_loss = orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
-        
+  
         logits = model.second_linear(features)
-        loss = F.cross_entropy(logits, target) + normperserving_loss + orthogonal_loss
+        loss = F.cross_entropy(logits, target)
+
+        if np_reg_lambda > 0:
+            loss = loss + normperserving_regularization(data, features, np_reg_lambda)
+        if o_reg_lambda > 0:
+            loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
+            
         loss.backward()
         optimizer.step()
 
