@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from datasets import load_dataset
 from datasets import load_from_disk
+from torch.utils.data import DataLoader, TensorDataset
 import random
 
 
@@ -119,7 +120,7 @@ def encode_split(dataset_split, vocab: dict):
     embeddings = [vectorize_text(text, vocab) for text in dataset_split["text"]]
     labels = torch.tensor(dataset_split["label"], dtype=torch.long)
     features = torch.stack(embeddings, dim=0)
-    return features, labels
+    return TensorDataset(features, labels)
 
 
 def get_imdb_dataset(local_dataset_path: str):
@@ -135,7 +136,7 @@ def get_imdb_dataset(local_dataset_path: str):
     return dataset
 
 
-def build_tensor_splits_from_bow(max_vocab_size: int, dataset_path: str, device: torch.device):
+def build_dataloaders_from_bow(batch_size: int, max_vocab_size: int, dataset_path: str):
     dataset = get_imdb_dataset(local_dataset_path=dataset_path)
     split = dataset["train"].train_test_split(test_size=0.2, seed=42)
     train_split = split["train"]
@@ -147,34 +148,28 @@ def build_tensor_splits_from_bow(max_vocab_size: int, dataset_path: str, device:
         max_vocab_size=max_vocab_size
     )
 
-    train_features, train_labels = encode_split(train_split, vocab)
-    val_features, val_labels = encode_split(val_split, vocab)
-    test_features, test_labels = encode_split(test_split, vocab)
+    train_dataset = encode_split(train_split, vocab)
+    val_dataset = encode_split(val_split, vocab)
+    test_dataset = encode_split(test_split, vocab)
 
-    return (
-        train_features.to(device),
-        train_labels.to(device),
-        val_features.to(device),
-        val_labels.to(device),
-        test_features.to(device),
-        test_labels.to(device),
-        len(vocab),
-    )
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+
+    return train_loader, val_loader, test_loader, len(vocab)
 
 
-def train(model, x_train, y_train, criterion, optimizer, batch_size, o_reg_lambda, np_reg_lambda):
+def train(model, dataloader, criterion, optimizer, device, o_reg_lambda, np_reg_lambda):
     model.train()
 
-    n_samples = x_train.size(0)
-    permutation = torch.randperm(n_samples, device=x_train.device)
     total_loss = 0.0
     correct = 0
-    total = n_samples
+    total = 0
 
-    for batch_start in range(0, n_samples, batch_size):
-        idx = permutation[batch_start : batch_start + batch_size]
-        bow_embedding = x_train[idx]
-        labels = y_train[idx]
+    for batch in dataloader:
+        bow_embedding, labels = batch
+        bow_embedding = bow_embedding.to(device)
+        labels = labels.to(device)
 
         optimizer.zero_grad(set_to_none=True)
 
@@ -192,19 +187,33 @@ def train(model, x_train, y_train, criterion, optimizer, batch_size, o_reg_lambd
         total_loss += loss.item() * labels.size(0)
         predictions = logits.argmax(dim=1)
         correct += (predictions == labels).sum().item()
+        total += labels.size(0)
 
     return total_loss / total, correct / total
 
 
-@torch.no_grad()
-def test(model, x, y, criterion):
+def test(model, dataloader, criterion, device):
     model.eval()
 
-    logits, _, _ = model(bow_embedding=x)
-    loss = criterion(logits, y)
-    predictions = logits.argmax(dim=1)
-    accuracy = (predictions == y).float().mean().item()
-    return loss.item(), accuracy
+    total_loss = 0.0
+    correct = 0
+    total = 0
+
+    for batch in dataloader:
+        bow_embedding, labels = batch
+        bow_embedding = bow_embedding.to(device)
+        labels = labels.to(device)
+
+        with torch.no_grad():
+            logits, features, bow_embedding = model(bow_embedding=bow_embedding)
+            loss = criterion(logits, labels) 
+
+        total_loss += loss.item() * labels.size(0)
+        predictions = logits.argmax(dim=1)
+        correct += (predictions == labels).sum().item()
+        total += labels.size(0)
+
+    return total_loss / total, correct / total
 
 
 def main():
@@ -213,10 +222,10 @@ def main():
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_x, train_y, val_x, val_y, test_x, test_y, vocab_size = build_tensor_splits_from_bow(
+    train_loader, val_loader, test_loader, vocab_size = build_dataloaders_from_bow(
+        batch_size=args.batch_size,
         max_vocab_size=args.vocab_size,
         dataset_path=args.dataset_path,
-        device=device,
     )
 
     model = SLFN_IMDB(
@@ -245,19 +254,18 @@ def main():
     for epoch in range(1, 401):
         train_loss, train_acc = train(
             model,
-            train_x,
-            train_y,
+            train_loader,
             criterion,
             optimizer,
-            args.batch_size,
+            device,
             args.o_reg_lambda,
             args.np_reg_lambda,
         )
         val_loss, val_acc = test(
             model,
-            val_x,
-            val_y,
+            val_loader,
             criterion,
+            device,
         )
 
         print(
@@ -290,9 +298,9 @@ def main():
 
         test_loss, test_acc = test(
             model,
-            test_x,
-            test_y,
+            test_loader,
             criterion,
+            device,
         )
         print(f"Test loss={test_loss:.4f} | Test accuracy={test_acc * 100:.2f}%")
     finally:
