@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms
 import torch.nn.functional as F
+from torch.utils.data import DataLoader, Subset, random_split
 
 HIDDEN_DIM = 8192 # [8, 32, 128, 512, 2048, 8192]
 BATCH_SIZE = 128 # [64, 128, 256]
@@ -14,8 +15,6 @@ WEIGHT_DECAY=0
 DROPOUT=0
 BATCH_NORM=False
 LEARNING_RATE=3e-4
-CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
-CIFAR10_STD = (0.2023, 0.1994, 0.2010)
 
 
 
@@ -69,32 +68,6 @@ def orthogonal_regularization(weight, o_reg_lambda):
     return o_reg_lambda * loss_ortho
 
 
-def get_cifar10_normalization_tensors(device):
-    mean = torch.tensor(CIFAR10_MEAN, device=device).view(1, 3, 1, 1)
-    std = torch.tensor(CIFAR10_STD, device=device).view(1, 3, 1, 1)
-    return mean, std
-
-
-def normalize_batch(data, mean, std):
-    return (data - mean) / std
-
-
-def augment_batch_on_gpu(data):
-    padded = F.pad(data, (4, 4, 4, 4), mode="constant", value=0.0)
-    n, _, h, w = data.shape
-    offsets_y = torch.randint(0, 9, (n,), device=data.device)
-    offsets_x = torch.randint(0, 9, (n,), device=data.device)
-
-    # Extract random 32x32 crops per sample from the padded tensor.
-    patches = padded.unfold(2, h, 1).unfold(3, w, 1)
-    sample_idx = torch.arange(n, device=data.device)
-    cropped = patches[sample_idx, :, offsets_y, offsets_x, :, :]
-
-    flip_mask = torch.rand(n, device=data.device) < 0.5
-    flipped = torch.flip(cropped, dims=[3])
-    return torch.where(flip_mask.view(-1, 1, 1, 1), flipped, cropped)
-
-
 class SLFN_CIFAR(nn.Module):
     def __init__(self, hidden_dim, dropout, use_batch_norm, use_layer_norm):
         super(SLFN_CIFAR, self).__init__()
@@ -128,69 +101,56 @@ class SLFN_CIFAR(nn.Module):
         return x
 
 
-def dataset_to_device_tensors(dataset, device, indices=None):
-    if indices is None:
-        indices = range(len(dataset))
-
-    data_batches = []
-    target_batches = []
-    for idx in indices:
-        sample, target = dataset[idx]
-        data_batches.append(sample)
-        target_batches.append(target)
-
-    x = torch.stack(data_batches, dim=0).to(device)
-    y = torch.tensor(target_batches, dtype=torch.long, device=device)
-    return x, y
-
-
-def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_reg_lambda, o_reg_lambda, mean, std):
+def train(model, device, train_loader, optimizer, epoch, np_reg_lambda, o_reg_lambda):
     model.train()
-    n_samples = x_train.size(0)
-    permutation = torch.randperm(n_samples, device=x_train.device)
-    epoch_loss = 0.0
+    running_loss = 0.0
 
-    for batch_start in range(0, n_samples, batch_size):
-        idx = permutation[batch_start : batch_start + batch_size]
-        data = x_train[idx]
-        target = y_train[idx]
-        model_input = normalize_batch(augment_batch_on_gpu(data), mean, std)
 
+    for batch_idx, (data, target) in enumerate(train_loader):
+        data, target = data.to(device), target.to(device)
+        
         optimizer.zero_grad()
-        features = model.forward_features(model_input)
+        features = model.forward_features(data)
+  
         logits = model.second_linear(features)
         loss = F.cross_entropy(logits, target)
 
         if np_reg_lambda > 0:
-            loss = loss + normperserving_regularization(model_input, features, np_reg_lambda)
+            loss = loss + normperserving_regularization(data, features, np_reg_lambda)
         if o_reg_lambda > 0:
             loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
 
         loss.backward()
         optimizer.step()
 
-        epoch_loss += loss.item() * data.size(0)
-        batch_idx = batch_start // batch_size
+        running_loss += loss.item()
         if batch_idx % 100 == 0:
             print(
-                f"Train Epoch: {epoch} [{batch_start}/{n_samples}] "
+                f"Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)}] "
                 f"Loss: {loss.item():.6f}"
             )
 
-    return epoch_loss / n_samples
+    return running_loss / len(train_loader)
 
 
-@torch.no_grad()
-def evaluate_tensor_split(model, x, y, split_name="Validation"):
+def test(model, device, test_loader):
     model.eval()
-    logits = model(x)
-    test_loss = F.cross_entropy(logits, y).item()
-    pred = logits.argmax(dim=1)
-    correct = (pred == y).sum().item()
-    accuracy = 100.0 * correct / y.size(0)
+    test_loss = 0.0
+    correct = 0
+
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            logits = model(data)
+            test_loss += F.cross_entropy(logits, target, reduction='sum').item()
+            pred = logits.argmax(dim=1, keepdim=True)
+            correct += pred.eq(target.view_as(pred)).sum().item()
+
+    test_loss /= len(test_loader.dataset)
+    accuracy = 100.0 * correct / len(test_loader.dataset)
     print(
-        f"\n{split_name} set: Average loss: {test_loss:.4f}, "
-        f"Accuracy: {correct}/{y.size(0)} ({accuracy:.2f}%)\n"
+        f"\nValidation set: Average loss: {test_loss:.4f}, "
+        f"Accuracy: {correct}/{len(test_loader.dataset)} ({accuracy:.2f}%)\n"
     )
     return test_loss, accuracy
 
@@ -201,21 +161,33 @@ def main():
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    base_transform = transforms.ToTensor()
-    full_train_dataset = datasets.CIFAR10("./data", train=True, download=True, transform=base_transform)
-    val_base_dataset = datasets.CIFAR10("./data", train=True, download=True, transform=base_transform)
+    train_transform = transforms.Compose(
+        [
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
+    )
+    test_transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
+    )
 
-    split_generator = torch.Generator().manual_seed(42)
-    all_indices = torch.randperm(len(full_train_dataset), generator=split_generator).tolist()
-    val_indices = all_indices[:5000]
-    train_indices = all_indices[5000:]
+    full_train_dataset = datasets.CIFAR10("./data", train=True, download=True, transform=train_transform)
+    val_base_dataset = datasets.CIFAR10("./data", train=True, download=True, transform=test_transform)
 
-    print("Loading CIFAR tensors to device memory...")
-    x_train, y_train = dataset_to_device_tensors(full_train_dataset, device, train_indices)
-    x_val_raw, y_val = dataset_to_device_tensors(val_base_dataset, device, val_indices)
-    mean, std = get_cifar10_normalization_tensors(device)
-    x_val = normalize_batch(x_val_raw, mean, std)
-    del x_val_raw
+    train_subset, val_subset = random_split(
+        full_train_dataset,
+        [len(full_train_dataset) - 5000, 5000],
+        generator=torch.Generator().manual_seed(42),
+    )
+    val_subset = Subset(val_base_dataset, val_subset.indices)
+
+    train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True, num_workers=12)
+    val_loader = DataLoader(val_subset, batch_size=256, shuffle=False, num_workers=12)
 
     model = SLFN_CIFAR(args.hidden_dim, args.dropout, args.batch_norm, args.layer_norm).to(device)
 
@@ -233,21 +205,18 @@ def main():
     best_accuracy = 0.0
     
     for epoch in range(1,1001):
-        train_loss = train_one_epoch(
-            model=model,
-            optimizer=optimizer,
-            epoch=epoch,
-            x_train=x_train,
-            y_train=y_train,
-            batch_size=args.batch_size,
-            np_reg_lambda=args.np_reg_lambda,
-            o_reg_lambda=args.o_reg_lambda,
-            mean=mean,
-            std=std,
+        train_loss = train(
+            model,
+            device,
+            train_loader,
+            optimizer,
+            epoch,
+            args.np_reg_lambda,
+            args.o_reg_lambda,
         )
 
         print(f"Epoch {epoch}: Train loss {train_loss:.6f}")
-        val_loss, accuracy = evaluate_tensor_split(model, x_val, y_val, split_name="Validation")
+        val_loss, accuracy = test(model, device, val_loader)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
