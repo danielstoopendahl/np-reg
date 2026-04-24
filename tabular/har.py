@@ -11,7 +11,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train an SLFN on UCI HAR")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--hidden-dim", type=int, default=128)
-    parser.add_argument("--np-reg-lambda", type=float, default=0.1)
+    parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--lr", type=float, default=3e-3)
     parser.add_argument("--weight-decay", type=float, default=0)
@@ -118,7 +118,7 @@ def main():
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dataset = torch.load("tabular/data/dataset_har.pt")
+    dataset = torch.load("data/dataset_har.pt")
 
     x_train = dataset["X_train"].to(device)
     y_train = dataset["y_train"].to(device)
