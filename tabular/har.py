@@ -12,7 +12,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train an SLFN on UCI HAR")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--hidden-dim", type=int, default=8192)
-    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -170,13 +170,8 @@ def main():
         ).to(device)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-
-        best_val_acc = -1.0
-        best_val_loss = float("inf")
-        best_state_dict = copy.deepcopy(model.state_dict())
-        best_epoch = 0
-        epochs_without_loss_improvement = 0
-        early_stop_patience = 16
+        val_acc = 0
+        val_loss = 0
 
         for epoch in range(args.epochs):
             train_loss, train_acc = train_one_epoch(
@@ -191,38 +186,29 @@ def main():
                 o_reg_lambda=args.o_reg_lambda,
             )
             val_acc, val_loss = evaluate(model, x_val, y_val, loss_fn)
+            print(
+                f"Epoch {epoch + 1:03d}/50 | "
+                f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} | "
+                f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
+            )
 
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
-                best_state_dict = copy.deepcopy(model.state_dict())
-                best_epoch = epoch + 1
+            
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                epochs_without_loss_improvement = 0
-            else:
-                epochs_without_loss_improvement += 1
-
-            if epochs_without_loss_improvement >= early_stop_patience:
-                break
-
-        val_accs.append(float(best_val_acc))
-        val_losses.append(float(best_val_loss))
-        val_epochs.append(best_epoch)
-        print(f"Fold {fold_idx+1}/5: best_val_acc={best_val_acc:.6f} best_val_loss={best_val_loss:.6f} best_epoch={best_epoch}")
+        val_accs.append(float(val_acc))
+        val_losses.append(float(val_loss))
+        print(f"Fold {fold_idx+1}/5: val_acc={val_acc:.6f} val_loss={val_loss:.6f}")
 
     mean_val_acc = float(np.mean(val_accs))
     mean_val_loss = float(np.mean(val_losses))
-    mean_val_epoch = float(np.median(val_epochs))
     
-    print(f"RESULT mean_val_acc={mean_val_acc:.6f} mean_val_loss={mean_val_loss:.6f} mean_val_epochs={mean_val_epoch}")
+    print(f"RESULT mean_val_acc={mean_val_acc:.6f} mean_val_loss={mean_val_loss:.6f}")
 
 
     # model.load_state_dict(best_state_dict)
 
-    x_test = (x_test - train_mean) / train_std
-    test_acc, test_loss = evaluate(model, x_test, y_test, loss_fn)
-    print(test_acc)
+    # x_test = (x_test - train_mean) / train_std
+    # test_acc, test_loss = evaluate(model, x_test, y_test, loss_fn)
+    # print(test_acc)
 
 
 if __name__ == "__main__":
