@@ -1,4 +1,5 @@
 import argparse
+import copy
 import random
 
 import numpy as np
@@ -10,10 +11,11 @@ import torch.nn.functional as F
 def parse_args():
     parser = argparse.ArgumentParser(description="Train an SLFN on UCI HAR")
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--hidden-dim", type=int, default=128)
+    parser.add_argument("--hidden-dim", type=int, default=8192)
+    parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--o-reg-lambda", type=float, default=0)
-    parser.add_argument("--lr", type=float, default=3e-3)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0)
     parser.add_argument("--dropout", type=float, default=0)
     parser.add_argument("--batch-norm", action="store_true", default=False)
@@ -103,13 +105,13 @@ def train_one_epoch(model, optimizer, loss_fn, x_train, y_train, batch_size, dev
 
 
 @torch.no_grad()
-def evaluate(model, loss_fn, x, y):
+def evaluate(model, x, y, loss_fn):
     model.eval()
     logits, _, _ = model(x)
-    loss = loss_fn(logits, y).item()
     preds = logits.argmax(dim=1)
+    loss = loss_fn(logits, y)
     acc = (preds == y).float().mean().item()
-    return loss, acc
+    return acc, loss
 
 
 def main():
@@ -118,73 +120,111 @@ def main():
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dataset = torch.load("data/dataset_har.pt")
 
-    x_train = dataset["X_train"].to(device)
-    y_train = dataset["y_train"].to(device)
-    x_val = dataset["X_val"].to(device)
-    y_val = dataset["y_val"].to(device)
+    dataset = torch.load("data/dataset_har.pt")
+    x_all = dataset["X_train"].to(device)
+    y_all = dataset["y_train"].to(device)
+    subject_all = dataset["subject_train"].cpu().numpy()
     x_test = dataset["X_test"].to(device)
     y_test = dataset["y_test"].to(device)
+
+    # Load subject-disjoint folds
+    import numpy as np
+    folds_data = np.load("data/har_cv_folds.npz")
+    folds = [folds_data[f"fold{i}"] for i in range(5)]
+    # folds = [[1,5,10,15]]
+
+    val_accs = []
+    val_losses = []
+    val_epochs = []
+
+    for fold_idx in range(5):
+        val_subjects = folds[fold_idx]
+        train_subjects = np.concatenate([folds[j] for j in range(5) if j != fold_idx])
+        # train_subjects = [2,6,7,8,9,3,11,12,13,14,4,16,17,18,19,1,5,10,15]
+        val_mask = np.isin(subject_all, val_subjects)
+        train_mask = np.isin(subject_all, train_subjects)
+
+        x_train = x_all[train_mask]
+        y_train = y_all[train_mask]
+        x_val = x_all[val_mask]
+        y_val = y_all[val_mask]
+
+        # Normalize using training split statistics only
+        train_mean = x_train.mean(dim=0, keepdim=True)
+        train_std = x_train.std(dim=0, keepdim=True)
+        train_std[train_std < 1e-6] = 1.0
+        x_train = (x_train - train_mean) / train_std
+        x_val = (x_val - train_mean) / train_std
+
+        input_dim = x_train.size(1)
+        num_classes = int(torch.max(y_train).item() + 1)
+        loss_fn = nn.CrossEntropyLoss()
+        model = SLFN(
+            input_dim=input_dim,
+            hidden_dim=args.hidden_dim,
+            num_classes=num_classes,
+            dropout=args.dropout,
+            use_batch_norm=args.batch_norm,
+            use_layer_norm=args.layer_norm,
+        ).to(device)
+
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+        best_val_acc = -1.0
+        best_val_loss = float("inf")
+        best_state_dict = copy.deepcopy(model.state_dict())
+        best_epoch = 0
+        epochs_without_loss_improvement = 0
+        early_stop_patience = 16
+
+        for epoch in range(args.epochs):
+            train_loss, train_acc = train_one_epoch(
+                model=model,
+                optimizer=optimizer,
+                loss_fn=loss_fn,
+                x_train=x_train,
+                y_train=y_train,
+                batch_size=args.batch_size,
+                device=device,
+                np_reg_lambda=args.np_reg_lambda,
+                o_reg_lambda=args.o_reg_lambda,
+            )
+            val_acc, val_loss = evaluate(model, x_val, y_val, loss_fn)
+
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+                best_state_dict = copy.deepcopy(model.state_dict())
+                best_epoch = epoch + 1
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                epochs_without_loss_improvement = 0
+            else:
+                epochs_without_loss_improvement += 1
+
+            if epochs_without_loss_improvement >= early_stop_patience:
+                break
+
+        val_accs.append(float(best_val_acc))
+        val_losses.append(float(best_val_loss))
+        val_epochs.append(best_epoch)
+        print(f"Fold {fold_idx+1}/5: best_val_acc={best_val_acc:.6f} best_val_loss={best_val_loss:.6f} best_epoch={best_epoch}")
+
+    mean_val_acc = float(np.mean(val_accs))
+    mean_val_loss = float(np.mean(val_losses))
+    mean_val_epoch = float(np.median(val_epochs))
     
-    input_dim = x_train.size(1)
-    num_classes = int(torch.max(y_train).item() + 1)
+    print(f"RESULT mean_val_acc={mean_val_acc:.6f} mean_val_loss={mean_val_loss:.6f} mean_val_epochs={mean_val_epoch}")
 
-    model = SLFN(
-        input_dim=input_dim,
-        hidden_dim=args.hidden_dim,
-        num_classes=num_classes,
-        dropout=args.dropout,
-        use_batch_norm=args.batch_norm,
-        use_layer_norm=args.layer_norm,
-    ).to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    loss_fn = nn.CrossEntropyLoss()
+    # model.load_state_dict(best_state_dict)
 
-    best_val_acc = -1.0
-    best_val_loss = float("inf")
-    best_state_dict = None
-
-    print("Starting SLFN training on UCI HAR...")
-    for epoch in range(100):
-        train_loss, train_acc = train_one_epoch(
-            model=model,
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            x_train=x_train,
-            y_train=y_train,
-            batch_size=args.batch_size,
-            device=device,
-            np_reg_lambda=args.np_reg_lambda,
-            o_reg_lambda=args.o_reg_lambda,
-        )
-        val_loss, val_acc = evaluate(model, loss_fn, x_val, y_val)
-
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_val_loss = val_loss
-            best_state_dict = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-
-        print(
-            f"Epoch {epoch + 1:03d}/100 | "
-            f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} | "
-            f"val_loss={val_loss:.4f} val_acc={val_acc:.4f} | "
-        )
-
-    if best_state_dict is not None:
-        model.load_state_dict(best_state_dict)
-
-    test_loss, test_acc = evaluate(model, loss_fn, x_test, y_test)
-    print(
-        f"Finished training. Best val accuracy: {best_val_acc:.4f} | "
-        f"best_val_loss={best_val_loss:.4f} | test_acc={test_acc:.4f}"
-    )
-    print(
-        f"RESULT best_val_acc={best_val_acc:.6f} "
-        f"best_val_loss={best_val_loss:.6f} test_acc={test_acc:.6f} test_loss={test_loss:.6f}"
-    )
+    x_test = (x_test - train_mean) / train_std
+    test_acc, test_loss = evaluate(model, x_test, y_test, loss_fn)
+    print(test_acc)
 
 
 if __name__ == "__main__":
     main()
+    
