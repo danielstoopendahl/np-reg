@@ -35,17 +35,17 @@ LEARNING_RATES=(3e-6 1e-5 3e-5)
 
 # (vocab_size hidden_dim) pairs from the CSV.
 MODEL_SPECS=(
-  "1562 8"
-  "3125 16"
-  "6250 32"
-  "12500 64"
-  "25000 128"
+  "1562 256"
+  "3125 256"
+  "6250 256"
+  "12500 256"
+  "25000 256"
   "50000 256"
 )
 
 WEIGHT_DECAYS=(1e-5 1e-4 1e-3)
 DROPOUTS=(0.1 0.3 0.5)
-NP_REGS=(0.01 0.1 1)
+NP_REGS=(0.001 0.01 0.1)
 
 print_help() {
   cat <<'EOF'

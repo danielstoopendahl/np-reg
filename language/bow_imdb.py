@@ -18,8 +18,8 @@ DEFAULT_DATASET_PATH = os.path.join(os.path.dirname(__file__), "data", "imdb_hf"
 def parser():
     parser = argparse.ArgumentParser(description="BoW embedder + MLP for IMDB sentiment")
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--lr", type=float, default=3e-6)
+    parser.add_argument("--hidden-dim", type=int, default=512)
     parser.add_argument("--dropout", type=float, default=0)
     parser.add_argument("--weight-decay", type=float, default=0)
     parser.add_argument("--o-reg-lambda", type=float, default=0)
@@ -50,7 +50,7 @@ def normperserving_regularization(data, features, reg_lambda):
 
 
 def orthogonal_regularization(weight, reg_lambda):
-    sym = torch.mm(weight.t(), weight)
+    sym = torch.mm(weight, weight.t())
     identity = torch.eye(sym.size(0), device=weight.device)
     loss_ortho = torch.norm(sym - identity, p="fro") ** 2
     return reg_lambda * loss_ortho
@@ -90,7 +90,7 @@ def tokenize_text(text: str):
     return text.lower().split()
 
 
-def build_vocab(texts, max_vocab_size: int=80000, min_freq: int=2):
+def build_vocab(texts, max_vocab_size: int=80000, min_freq: int=1):
     counter = Counter()
     for text in texts:
         counter.update(tokenize_text(text))
