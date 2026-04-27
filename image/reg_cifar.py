@@ -1,4 +1,5 @@
 import argparse
+import copy
 import random
 import torch
 import torch.nn as nn
@@ -204,6 +205,7 @@ def main():
     base_transform = transforms.ToTensor()
     full_train_dataset = datasets.CIFAR10("./data", train=True, download=True, transform=base_transform)
     val_base_dataset = datasets.CIFAR10("./data", train=True, download=True, transform=base_transform)
+    test_base_dataset = datasets.CIFAR10("./data", train=False, download=True, transform=base_transform)
 
     split_generator = torch.Generator().manual_seed(42)
     all_indices = torch.randperm(len(full_train_dataset), generator=split_generator).tolist()
@@ -213,9 +215,12 @@ def main():
     print("Loading CIFAR tensors to device memory...")
     x_train, y_train = dataset_to_device_tensors(full_train_dataset, device, train_indices)
     x_val_raw, y_val = dataset_to_device_tensors(val_base_dataset, device, val_indices)
+    x_test_raw, y_test = dataset_to_device_tensors(test_base_dataset, device)
     mean, std = get_cifar10_normalization_tensors(device)
     x_val = normalize_batch(x_val_raw, mean, std)
+    x_test = normalize_batch(x_test_raw, mean, std)
     del x_val_raw
+    del x_test_raw
 
     model = SLFN_CIFAR(args.hidden_dim, args.dropout, args.batch_norm, args.layer_norm).to(device)
 
@@ -231,6 +236,7 @@ def main():
 
     best_val_loss = float("inf")
     best_accuracy = 0.0
+    best_model_state = copy.deepcopy(model.state_dict())
     
     for epoch in range(1,1001):
         train_loss = train_one_epoch(
@@ -253,6 +259,7 @@ def main():
             best_val_loss = val_loss
         if accuracy > best_accuracy:
             best_accuracy = accuracy
+            best_model_state = copy.deepcopy(model.state_dict())
 
         scheduler.step(val_loss)
         current_lr = optimizer.param_groups[0]['lr']
@@ -260,6 +267,10 @@ def main():
         if current_lr <= 2*min_lr:
             print("Minimum learning rate reached. Stopping training.")
             break
+
+    # Evaluate test accuracy from the checkpoint selected by best validation accuracy.
+    model.load_state_dict(best_model_state)
+    test_loss, test_accuracy = evaluate_tensor_split(model, x_test, y_test, split_name="Test")
 
     print(
         f"Run finished with arguments: \nbatch_size={args.batch_size}\n"
@@ -275,6 +286,8 @@ def main():
     )
     print(f"Best val loss: {best_val_loss:.6f}")
     print(f"Best val accuracy: {best_accuracy:.2f}%")
+    print(f"Final test loss: {test_loss:.6f}")
+    print(f"Final test accuracy: {test_accuracy:.2f}%")
 
 
 if __name__ == "__main__":
