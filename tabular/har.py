@@ -21,8 +21,6 @@ def parse_args():
     parser.add_argument("--batch-norm", action="store_true", default=False)
     parser.add_argument("--layer-norm", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--cv-seeds", type=int, nargs="+", default=[42, 123, 456],
-                        help="Seeds for repeated CV splits (one per repeat)")
     return parser.parse_args()
 
 def set_seed(seed):
@@ -36,23 +34,21 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def make_subject_folds(subjects_unique, n_splits, seed):
-    """Randomly partition unique subjects into n_splits folds."""
-    rng = np.random.default_rng(seed)
-    shuffled = rng.permutation(subjects_unique)
-    return np.array_split(shuffled, n_splits)
-
 def normperserving_regularization(data, features, reg_lambda):
     data_norm = torch.norm(data.view(data.size(0), -1), p=2, dim=1)
     features_norm = torch.norm(features.view(features.size(0), -1), p=2, dim=1)
     norm_diff_loss = F.mse_loss(data_norm, features_norm)
+    
     return reg_lambda * norm_diff_loss
 
 def orthogonal_regularization(weight, o_reg_lambda):
     sym = torch.mm(weight.t(), weight)
     identity = torch.eye(sym.size(0), device=weight.device)
     loss_ortho = torch.norm(sym - identity, p='fro')**2
+    
     return o_reg_lambda * loss_ortho
+
+
 
 class SLFN(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_classes, dropout, use_batch_norm, use_layer_norm):
@@ -123,99 +119,88 @@ def evaluate(model, x, y, loss_fn):
 def main():
     args = parse_args()
 
-    set_seed(args.seed)  # controls model init randomness, independent of CV splits
+    set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
     dataset = torch.load("data/dataset_har.pt")
     x_all = dataset["X_train"].to(device)
     y_all = dataset["y_train"].to(device)
     subject_all = dataset["subject_train"].cpu().numpy()
-    x_test = dataset["X_test"].to(device)
-    y_test = dataset["y_test"].to(device)
 
-    unique_subjects = np.unique(subject_all)
-    n_splits = 5
-    cv_seeds = args.cv_seeds  # e.g. [42, 123, 456] — same for all models you compare
+    # Load subject-disjoint folds
+    import numpy as np
+    folds_data = np.load("data/har_cv_folds.npz")
+    folds = [folds_data[f"fold{i}"] for i in range(5)]
+    # folds = [[1,5,10,15]]
 
-    all_val_accs = []
-    all_val_losses = []
+    val_accs = []
+    val_losses = []
 
-    for repeat_idx, cv_seed in enumerate(cv_seeds):
-        folds = make_subject_folds(unique_subjects, n_splits, seed=cv_seed)
+    for fold_idx in range(5):
+        val_subjects = folds[fold_idx]
+        train_subjects = np.concatenate([folds[j] for j in range(5) if j != fold_idx])
+        # train_subjects = [2,6,7,8,9,3,11,12,13,14,4,16,17,18,19,1,5,10,15]
+        val_mask = np.isin(subject_all, val_subjects)
+        train_mask = np.isin(subject_all, train_subjects)
 
-        repeat_val_accs = []
-        repeat_val_losses = []
+        x_train = x_all[train_mask]
+        y_train = y_all[train_mask]
+        x_val = x_all[val_mask]
+        y_val = y_all[val_mask]
 
-        for fold_idx in range(n_splits):
-            val_subjects = folds[fold_idx]
-            train_subjects = np.concatenate([folds[j] for j in range(n_splits) if j != fold_idx])
-            val_mask = np.isin(subject_all, val_subjects)
-            train_mask = np.isin(subject_all, train_subjects)
+        # Normalize using training split statistics only
+        train_mean = x_train.mean(dim=0, keepdim=True)
+        train_std = x_train.std(dim=0, keepdim=True)
+        train_std[train_std < 1e-6] = 1.0
+        x_train = (x_train - train_mean) / train_std
+        x_val = (x_val - train_mean) / train_std
 
-            x_train = x_all[train_mask]
-            y_train = y_all[train_mask]
-            x_val = x_all[val_mask]
-            y_val = y_all[val_mask]
+        input_dim = x_train.size(1)
+        num_classes = int(torch.max(y_train).item() + 1)
+        loss_fn = nn.CrossEntropyLoss()
+        model = SLFN(
+            input_dim=input_dim,
+            hidden_dim=args.hidden_dim,
+            num_classes=num_classes,
+            dropout=args.dropout,
+            use_batch_norm=args.batch_norm,
+            use_layer_norm=args.layer_norm,
+        ).to(device)
 
-            # Normalize using training split statistics only
-            train_mean = x_train.mean(dim=0, keepdim=True)
-            train_std = x_train.std(dim=0, keepdim=True)
-            train_std[train_std < 1e-6] = 1.0
-            x_train = (x_train - train_mean) / train_std
-            x_val = (x_val - train_mean) / train_std
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        val_acc = 0
+        val_loss = 0
 
-            input_dim = x_train.size(1)
-            num_classes = int(torch.max(y_train).item() + 1)
-            loss_fn = nn.CrossEntropyLoss()
-            model = SLFN(
-                input_dim=input_dim,
-                hidden_dim=args.hidden_dim,
-                num_classes=num_classes,
-                dropout=args.dropout,
-                use_batch_norm=args.batch_norm,
-                use_layer_norm=args.layer_norm,
-            ).to(device)
+        for epoch in range(args.epochs):
+            train_loss, train_acc = train_one_epoch(
+                model=model,
+                optimizer=optimizer,
+                loss_fn=loss_fn,
+                x_train=x_train,
+                y_train=y_train,
+                batch_size=args.batch_size,
+                device=device,
+                np_reg_lambda=args.np_reg_lambda,
+                o_reg_lambda=args.o_reg_lambda,
+            )
+            val_acc, val_loss = evaluate(model, x_val, y_val, loss_fn)
+            print(
+                f"Epoch {epoch + 1:03d}/50 | "
+                f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} | "
+                f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
+            )
 
-            optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+            
 
-            for epoch in range(args.epochs):
-                train_loss, train_acc = train_one_epoch(
-                    model=model,
-                    optimizer=optimizer,
-                    loss_fn=loss_fn,
-                    x_train=x_train,
-                    y_train=y_train,
-                    batch_size=args.batch_size,
-                    device=device,
-                    np_reg_lambda=args.np_reg_lambda,
-                    o_reg_lambda=args.o_reg_lambda,
-                )
-                val_acc, val_loss = evaluate(model, x_val, y_val, loss_fn)
-                print(
-                    f"[Repeat {repeat_idx+1}/{len(cv_seeds)} | Fold {fold_idx+1}/{n_splits} | Epoch {epoch+1:03d}/{args.epochs}] "
-                    f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} | "
-                    f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
-                )
+        val_accs.append(float(val_acc))
+        val_losses.append(float(val_loss))
+        print(f"Fold {fold_idx+1}/5: val_acc={val_acc:.6f} val_loss={val_loss:.6f}")
 
-            repeat_val_accs.append(float(val_acc))
-            repeat_val_losses.append(float(val_loss))
-            print(f"  -> Repeat {repeat_idx+1} Fold {fold_idx+1}: val_acc={val_acc:.6f} val_loss={val_loss:.6f}")
-
-        repeat_mean_acc = float(np.mean(repeat_val_accs))
-        repeat_mean_loss = float(np.mean(repeat_val_losses))
-        print(f"Repeat {repeat_idx+1} mean: val_acc={repeat_mean_acc:.6f} val_loss={repeat_mean_loss:.6f}")
-
-        all_val_accs.extend(repeat_val_accs)
-        all_val_losses.extend(repeat_val_losses)
-
-    # Final result: mean over all 15 folds (3 repeats x 5 folds)
-    mean_val_acc = float(np.mean(all_val_accs))
-    mean_val_loss = float(np.mean(all_val_losses))
-    std_val_acc = float(np.std(all_val_accs))
-    std_val_loss = float(np.std(all_val_losses))
-
-    print(f"\nRESULT mean_val_acc={mean_val_acc:.6f} std={std_val_acc:.6f} mean_val_loss={mean_val_loss:.6f} std={std_val_loss:.6f}")
-
+    mean_val_acc = float(np.mean(val_accs))
+    mean_val_loss = float(np.mean(val_losses))
+    
+    print(f"RESULT mean_val_acc={mean_val_acc:.6f} mean_val_loss={mean_val_loss:.6f}")
 
 if __name__ == "__main__":
     main()

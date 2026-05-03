@@ -200,14 +200,12 @@ def main():
 
     mean_val_acc = float(np.mean(val_accs))
     mean_val_loss = float(np.mean(val_losses))
-    
-    print(f"RESULT mean_val_acc={mean_val_acc:.6f} mean_val_loss={mean_val_loss:.6f}")
 
-
-
-    
     test_acc, test_loss = evaluate(model, x_test, y_test, loss_fn)
-    print(f"test_acc={test_acc:.6f}")
+    print(
+        f"RESULT mean_val_acc={mean_val_acc:.6f} "
+        f"mean_val_loss={mean_val_loss:.6f} test_acc={test_acc:.6f}"
+    )
 
 
 if __name__ == "__main__":
