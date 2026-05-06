@@ -1,8 +1,9 @@
 import argparse
 import copy
+import json
+import math
 import random
 import torch
-import json
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms
@@ -69,6 +70,106 @@ def orthogonal_regularization(weight, o_reg_lambda):
     loss_ortho = torch.norm(sym - identity, p='fro')**2
     
     return o_reg_lambda * loss_ortho
+
+
+loss_landscapes = []
+gradient_stabilities = []
+gradient_relative_stabilities = []
+effective_betas = []
+
+
+def calculate_ll_n_gp(model, model_input, target, base_lr, np_reg_lambda):
+    was_training = model.training
+
+    # Expect gradients to be present for all trainable parameters
+    assert any(p.grad is not None for p in model.parameters()), "Expected gradients to be present"
+
+    # Save original gradients (will be needed by optimizer.step() after this function)
+    orig_grads = {name: p.grad.clone() if p.grad is not None else None for name, p in model.named_parameters()}
+    # Use a fixed direction equal to the original gradient.
+    grad_direction = {name: g.clone() if g is not None else None for name, g in orig_grads.items()}
+
+    orig_state = {k: v.clone() for k, v in model.state_dict().items()}
+
+    losses_for_steps = []
+    grad_norms_for_steps = []
+    beta_values = []
+    prev_grads = None
+
+    # Apply initial 0.5*lr step along the fixed original gradient direction.
+    with torch.no_grad():
+        for name, p in model.named_parameters():
+            g = grad_direction.get(name)
+            if g is not None:
+                p.data = p.data - 0.1 * base_lr * g
+
+    # Evaluate loss and gradient norm at each of 36 steps
+    for i in range(40):
+
+        features = model.forward_features(model_input)
+        logits = model.second_linear(features)
+
+        loss_val = F.cross_entropy(logits, target)
+
+        if np_reg_lambda > 0:
+            loss_val = loss_val + normperserving_regularization(model_input, features, np_reg_lambda)
+
+        losses_for_steps.append(loss_val.item())
+
+        # Clear old gradients
+        for p in model.parameters():
+            p.grad = None
+        loss_val.backward()
+
+        # Compute Euclidean distance between original grad and current grad.
+        grad_distance = 0.0
+        for name, p in model.named_parameters():
+            if p.grad is not None and name in orig_grads and orig_grads[name] is not None:
+                grad_diff = p.grad - orig_grads[name]
+                grad_distance += (grad_diff ** 2).sum().item()
+        grad_distance = grad_distance ** 0.5
+        grad_norms_for_steps.append(grad_distance)
+
+
+        # Effective beta smoothness estimate: adjacent gradient differences divided by 0.1.
+        if prev_grads is None:
+            beta_values.append(float("nan"))
+        else:
+            adj_grad_distance = 0.0
+            for name, p in model.named_parameters():
+                if p.grad is not None and name in prev_grads and prev_grads[name] is not None:
+                    grad_diff = p.grad - prev_grads[name]
+                    adj_grad_distance += (grad_diff ** 2).sum().item()
+            adj_grad_distance = adj_grad_distance ** 0.5
+            beta_values.append(adj_grad_distance / 0.1)
+
+        prev_grads = {name: p.grad.clone() if p.grad is not None else None for name, p in model.named_parameters()}
+
+        # Advance by 0.1*lr for next step (skip after last), still along the fixed direction.
+        if i != 39:
+            with torch.no_grad():
+                for name, p in model.named_parameters():
+                    g = grad_direction.get(name)
+                    if g is not None:
+                        p.data = p.data - 0.1 * base_lr * g
+
+    # Restore original parameters
+    model.load_state_dict(orig_state)
+
+    # Restore original gradients for optimizer.step()
+    for name, p in model.named_parameters():
+        if name in orig_grads:
+            p.grad = orig_grads[name]
+
+    loss_landscapes.append(losses_for_steps)
+    gradient_stabilities.append(grad_norms_for_steps)
+    finite_betas = [b for b in beta_values if not math.isnan(b)]
+    effective_betas.append(max(finite_betas) if finite_betas else float("nan"))
+
+    if was_training:
+        model.train()
+    else:
+        model.eval()
 
 
 def get_cifar10_normalization_tensors(device):
@@ -145,107 +246,12 @@ def dataset_to_device_tensors(dataset, device, indices=None):
     y = torch.tensor(target_batches, dtype=torch.long, device=device)
     return x, y
 
-loss_landscapes = []
-gradient_stabilities = []
-gradient_relative_stabilities = []
-effective_betas = []
-
-def calculate_ll_n_gp(model, model_input, target, base_lr):
-    model.eval()
-
-    # Expect gradients to be present for all trainable parameters
-    assert any(p.grad is not None for p in model.parameters()), "Expected gradients to be present"
-
-    # Save original gradients (will be needed by optimizer.step() after this function)
-    orig_grads = {name: p.grad.clone() if p.grad is not None else None for name, p in model.named_parameters()}
-
-    # Precompute L2 norm of original gradients
-    orig_grad_norm = 0.0
-    for g in orig_grads.values():
-        if g is not None:
-            orig_grad_norm += (g ** 2).sum().item()
-    orig_grad_norm = orig_grad_norm ** 0.5
-
-    # Save original state dict (cloned tensors)
-    orig_state = {k: v.clone() for k, v in model.state_dict().items()}
-
-    losses_for_steps = []
-    grad_norms_for_steps = []
-    rel_grad_norms_for_steps = []
-    beta_values = []
-    eps = 1e-12
-    
-    # Apply initial 0.5*lr step
-    for p in model.parameters():
-        if p.grad is not None:
-            p.data = p.data - 0.5 * base_lr * p.grad
-
-    # Evaluate loss and gradient norm at each of 36 steps
-    for i in range(36):
-        # Compute loss at this step
-
-        logits = model(model_input)
-        loss_val = F.cross_entropy(logits, target)
-        losses_for_steps.append(loss_val.item())
-        
-        # Clear old gradients
-        for p in model.parameters():
-            p.grad = None
-        loss_val.backward()
-        
-        # Compute Euclidean distance between original grad and current grad.
-        grad_distance = 0.0
-        for name, p in model.named_parameters():
-            if p.grad is not None and name in orig_grads and orig_grads[name] is not None:
-                grad_diff = p.grad - orig_grads[name]
-                grad_distance += (grad_diff ** 2).sum().item()
-        grad_distance = grad_distance ** 0.5
-        grad_norms_for_steps.append(grad_distance)
-
-        # Relative gradient change (scale-invariant)
-        rel = grad_distance / (orig_grad_norm + eps)
-        rel_grad_norms_for_steps.append(rel)
-
-        # Effective beta smoothness estimate: ||grad(theta+u)-grad(theta)|| / ||u||
-        # Approximate ||u|| as cumulative_step * ||orig_grad|| where cumulative_step = (0.5 + i*0.1) * base_lr
-        step_multiplier = 0.5 + i * 0.1
-        disp_norm = step_multiplier * base_lr * orig_grad_norm
-
-        if disp_norm == 0.0:
-            beta = float('nan')
-        else:
-            beta = grad_distance / disp_norm
-        beta_values.append(beta)
-        
-        # Advance by 0.1*lr for next step (skip after last)
-        if i != 35:
-            with torch.no_grad():
-                for p in model.parameters():
-                    if p.grad is not None:
-                        p.data = p.data - 0.1 * base_lr * p.grad
-
-    # Restore original parameters
-    model.load_state_dict(orig_state)
-
-    # Restore original gradients for optimizer.step()
-    for name, p in model.named_parameters():
-        if name in orig_grads:
-            p.grad = orig_grads[name]
-
-    loss_landscapes.append(losses_for_steps)
-    gradient_stabilities.append(grad_norms_for_steps)
-    gradient_relative_stabilities.append(rel_grad_norms_for_steps)
-
-    effective_betas.append(max(beta_values))
-
-    model.train()
 
 def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_reg_lambda, o_reg_lambda, mean, std):
     model.train()
     n_samples = x_train.size(0)
     permutation = torch.randperm(n_samples, device=x_train.device)
     epoch_loss = 0.0
-
 
     for batch_start in range(0, n_samples, batch_size):
         idx = permutation[batch_start : batch_start + batch_size]
@@ -264,16 +270,13 @@ def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_re
             loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
 
         loss.backward()
-
-
-        current_lr = optimizer.param_groups[0]["lr"]
-
-        calculate_ll_n_gp(model, model_input, target, current_lr,)
-
+        batch_idx = batch_start // batch_size
+        if batch_idx % 10 == 0:
+            current_lr = optimizer.param_groups[0]["lr"]
+            calculate_ll_n_gp(model, model_input, target, current_lr, np_reg_lambda)
         optimizer.step()
 
         epoch_loss += loss.item() * data.size(0)
-        batch_idx = batch_start // batch_size
         if batch_idx % 100 == 0:
             print(
                 f"Train Epoch: {epoch} [{batch_start}/{n_samples}] "
@@ -328,19 +331,13 @@ def main():
 
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     min_lr = 1e-8
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        factor=0.5,
-        patience=16,
-        min_lr=min_lr,
-    )
+
 
     best_val_loss = float("inf")
     best_accuracy = 0.0
     best_model_state = copy.deepcopy(model.state_dict())
     
-    for epoch in range(1,2):
+    for epoch in range(1,201):
         train_loss = train_one_epoch(
             model=model,
             optimizer=optimizer,
@@ -363,7 +360,6 @@ def main():
             best_accuracy = accuracy
             best_model_state = copy.deepcopy(model.state_dict())
 
-        scheduler.step(val_loss)
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Epoch {epoch}: Learning rate {current_lr:.2e}")
         if current_lr <= 2*min_lr:
@@ -391,24 +387,20 @@ def main():
     print(f"Final test loss: {test_loss:.6f}")
     print(f"Final test accuracy: {test_accuracy:.2f}%")
 
-    # Save only min/max ranges for the requested metrics.
+    # Save min/max ranges for loss, and full curves for gradient-change metrics.
     loss_landscapes_ranges = [
         {"min": min(values), "max": max(values)}
         for values in loss_landscapes
     ]
-    gradient_relative_stabilities_ranges = [
-        {"min": min(values), "max": max(values)}
-        for values in gradient_relative_stabilities
-    ]
     out_metrics = {
         "loss_landscapes": loss_landscapes_ranges,
-        "gradient_relative_stabilities": gradient_relative_stabilities_ranges,
+        "gradient_stabilities": gradient_stabilities,
         "effective_betas": effective_betas,
     }
-    save_path = "reg_cifar_stability_metrics.json"
-    with open(save_path, "w") as f:
+    save_metrics_path = "stability_metrics_np.json"
+    with open(save_metrics_path, "w") as f:
         json.dump(out_metrics, f, indent=2)
-    print(f"Saved metrics to {save_path}")
+    print(f"Saved metrics to {save_metrics_path}")
 
 
 if __name__ == "__main__":
