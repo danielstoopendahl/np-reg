@@ -1,3 +1,5 @@
 image/data
 language/data
 tabular/data
+image_finetuning/data
+language_finetuning/data
