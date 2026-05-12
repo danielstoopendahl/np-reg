@@ -3,3 +3,9 @@ language/data
 tabular/data
 image_finetuning/data
 language_finetuning/data
+
+image/__pycache__
+language/__pycache__
+tabular/__pycache__
+image_finetuning/__pycache__
+language_finetuning/__pycache__
