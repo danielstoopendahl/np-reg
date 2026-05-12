@@ -188,6 +188,28 @@ def evaluate_test_set(model, device, test_loader):
     return test_loss, accuracy
 
 
+@torch.no_grad()
+def evaluate_norm_diff(model, device, data_loader, split_name):
+    model.eval()
+    total_loss = 0.0
+    total_samples = 0
+
+    for data, _ in data_loader:
+        data = data.to(device)
+        features = model.forward_features(data)
+
+        data_norm = torch.norm(data.view(data.size(0), -1), p=2, dim=1)
+        features_norm = torch.norm(features.view(features.size(0), -1), p=2, dim=1)
+        batch_loss = F.mse_loss(data_norm, features_norm, reduction="sum").item()
+
+        total_loss += batch_loss
+        total_samples += data.size(0)
+
+    avg_loss = total_loss / max(total_samples, 1)
+    print(f"{split_name} norm diff (MSE): {avg_loss:.6f}")
+    return avg_loss
+
+
 
 def main():
     args = parse_args()
@@ -221,6 +243,7 @@ def main():
     test_dataset = datasets.CIFAR10("./data", train=False, download=True, transform=test_transform)
 
     train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True, num_workers=12)
+    train_eval_loader = DataLoader(train_subset, batch_size=256, shuffle=False, num_workers=12)
     val_loader = DataLoader(val_subset, batch_size=256, shuffle=False, num_workers=12)
     test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=12)
 
@@ -280,6 +303,8 @@ def main():
     print(f"Best val loss: {best_val_loss:.6f}")
     print(f"Best val accuracy: {best_accuracy:.2f}%")
     evaluate_test_set(model, device, test_loader)
+    evaluate_norm_diff(model, device, train_eval_loader, "Train")
+    evaluate_norm_diff(model, device, test_loader, "Test")
 
 
 if __name__ == "__main__":
