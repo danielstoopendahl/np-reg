@@ -106,12 +106,12 @@ def plot_csv(csv_path: Path, title: str) -> Path:
     )
 
     palette = {
-        "Vanilla": "#E07070",
-        "Layer Norm": "#5B8BC5",
-        "Batch Norm": "#70B070",
-        "Weight Decay": "#C58B5B",
-        "Dropout": "#8E70C5",
-        "Np-reg": "#5BC5B0",
+        "Vanilla": "#C1CBD9",
+        "Layer Norm": "#C0B76F",
+        "Batch Norm": "#858C51",
+        "Weight Decay": "#A67F5D",
+        "Dropout": "#CAB9A9",
+        "Np-reg": "#88AABF",
     }
 
     fig, ax = plt.subplots(figsize=(9, 5))
