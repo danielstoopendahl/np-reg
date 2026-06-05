@@ -10,27 +10,25 @@ import torch.nn.functional as F
 HIDDEN_DIM = 8192 # [8, 32, 128, 512, 2048, 8192]
 BATCH_SIZE = 128 # [64, 128, 256]
 NP_REG_LAMBDA = 0 # [0.01, 0.1, 1]
-O_REG_LAMBDA = 0 # []
 WEIGHT_DECAY=0
 DROPOUT=0
 BATCH_NORM=False
+LAYER_NORM=False
 LEARNING_RATE=3e-4
-CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
-CIFAR10_STD = (0.2023, 0.1994, 0.2010)
 
-
+X_MEAN_NORM = 66.889832
+X_STD_NORM = 17.783205 # Not low since brightness is correlated
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--hidden-dim", type=int, default=HIDDEN_DIM)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--np-reg-lambda", type=float, default=NP_REG_LAMBDA)
-    parser.add_argument("--o-reg-lambda", type=float, default=O_REG_LAMBDA)
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY)
     parser.add_argument("--dropout", type=float, default=DROPOUT)
     parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE)
     parser.add_argument("--batch-norm", action="store_true", default=BATCH_NORM)
-    parser.add_argument("--layer-norm", action="store_true", default=False)
+    parser.add_argument("--layer-norm", action="store_true", default=LAYER_NORM)
     parser.add_argument("--seed", type=int, default=None)
 
     return parser.parse_args()
@@ -46,38 +44,13 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 def normperserving_regularization(data, features, np_reg_lambda):
-    """
-    Computes the norm-preserving regularization penalty.
-    Penalizes differences between the norm of input data and the norm of output features.
-    """
 
     data_norm = torch.norm(data.view(data.size(0), -1), p=2, dim=1)
+    # data_norm = torch.full((data.size(0),), X_MEAN_NORM, dtype=data.dtype, device=data.device) # Fixed norm ablation
     features_norm = torch.norm(features.view(features.size(0), -1), p=2, dim=1)
     norm_diff_loss = F.mse_loss(data_norm, features_norm)
     
     return np_reg_lambda * norm_diff_loss
-
-def orthogonal_regularization(weight, o_reg_lambda):
-    """
-    Computes the orthogonal regularization penalty: 
-    L = lambda * ||W^T W - I||_F^2
-    """
-
-    sym = torch.mm(weight.t(), weight)
-    identity = torch.eye(sym.size(0), device=weight.device)
-    loss_ortho = torch.norm(sym - identity, p='fro')**2
-    
-    return o_reg_lambda * loss_ortho
-
-
-def get_cifar10_normalization_tensors(device):
-    mean = torch.tensor(CIFAR10_MEAN, device=device).view(1, 3, 1, 1)
-    std = torch.tensor(CIFAR10_STD, device=device).view(1, 3, 1, 1)
-    return mean, std
-
-
-def normalize_batch(data, mean, std):
-    return (data - mean) / std
 
 
 def augment_batch_on_gpu(data):
@@ -96,9 +69,9 @@ def augment_batch_on_gpu(data):
     return torch.where(flip_mask.view(-1, 1, 1, 1), flipped, cropped)
 
 
-class SLFN_CIFAR(nn.Module):
+class SNN_CIFAR(nn.Module):
     def __init__(self, hidden_dim, dropout, use_batch_norm, use_layer_norm):
-        super(SLFN_CIFAR, self).__init__()
+        super(SNN_CIFAR, self).__init__()
 
         input_dim = 3 * 32 * 32
         output_dim = 10
@@ -145,7 +118,7 @@ def dataset_to_device_tensors(dataset, device, indices=None):
     return x, y
 
 
-def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_reg_lambda, o_reg_lambda, mean, std):
+def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_reg_lambda, mean, std):
     model.train()
     n_samples = x_train.size(0)
     permutation = torch.randperm(n_samples, device=x_train.device)
@@ -155,7 +128,7 @@ def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_re
         idx = permutation[batch_start : batch_start + batch_size]
         data = x_train[idx]
         target = y_train[idx]
-        model_input = normalize_batch(augment_batch_on_gpu(data), mean, std)
+        model_input = (augment_batch_on_gpu(data) - mean) / std
 
         optimizer.zero_grad()
         features = model.forward_features(model_input)
@@ -164,8 +137,6 @@ def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_re
 
         if np_reg_lambda > 0:
             loss = loss + normperserving_regularization(model_input, features, np_reg_lambda)
-        if o_reg_lambda > 0:
-            loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
 
         loss.backward()
         optimizer.step()
@@ -196,7 +167,6 @@ def evaluate_tensor_split(model, x, y, split_name="Validation"):
     return test_loss, accuracy
 
 
-
 def main():
     args = parse_args()
     set_seed(args.seed)
@@ -216,13 +186,14 @@ def main():
     x_train, y_train = dataset_to_device_tensors(full_train_dataset, device, train_indices)
     x_val_raw, y_val = dataset_to_device_tensors(val_base_dataset, device, val_indices)
     x_test_raw, y_test = dataset_to_device_tensors(test_base_dataset, device)
-    mean, std = get_cifar10_normalization_tensors(device)
-    x_val = normalize_batch(x_val_raw, mean, std)
-    x_test = normalize_batch(x_test_raw, mean, std)
+    mean = torch.tensor((0.4914, 0.4822, 0.4465), device=device).view(1, 3, 1, 1)
+    std = torch.tensor((0.2023, 0.1994, 0.2010), device=device).view(1, 3, 1, 1)
+    x_val = (x_val_raw - mean) / std
+    x_test = (x_test_raw - mean) / std
     del x_val_raw
     del x_test_raw
 
-    model = SLFN_CIFAR(args.hidden_dim, args.dropout, args.batch_norm, args.layer_norm).to(device)
+    model = SNN_CIFAR(args.hidden_dim, args.dropout, args.batch_norm, args.layer_norm).to(device)
 
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     min_lr = 1e-8
@@ -247,7 +218,6 @@ def main():
             y_train=y_train,
             batch_size=args.batch_size,
             np_reg_lambda=args.np_reg_lambda,
-            o_reg_lambda=args.o_reg_lambda,
             mean=mean,
             std=std,
         )
@@ -276,7 +246,6 @@ def main():
         f"Run finished with arguments: \nbatch_size={args.batch_size}\n"
         f"hidden_dim={args.hidden_dim}\n"
         f"np_reg_lambda={args.np_reg_lambda}\n"
-        f"o_reg_lambda={args.o_reg_lambda}\n"
         f"weight_degay={args.weight_decay}\n"
         f"dropout={args.dropout}\n"
         f"batchnorm={args.batch_norm}\n"

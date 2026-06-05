@@ -1,42 +1,37 @@
 import argparse
 import copy
-import json
-import os
 import random
+import json
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms
 import torch.nn.functional as F
+import os
 
 HIDDEN_DIM = 8192 # [8, 32, 128, 512, 2048, 8192]
 BATCH_SIZE = 128 # [64, 128, 256]
 NP_REG_LAMBDA = 0 # [0.01, 0.1, 1]
-O_REG_LAMBDA = 0 # []
 WEIGHT_DECAY=0
 DROPOUT=0
 BATCH_NORM=False
 LEARNING_RATE=3e-4
-CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
-CIFAR10_STD = (0.2023, 0.1994, 0.2010)
-DEFAULT_RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
-DEFAULT_SPECTRUM_JSON_DIR = os.path.join(DEFAULT_RESULTS_DIR, "spectra")
 
-
+X_MEAN_NORM = 66.889832
+X_STD_NORM = 17.783205 # Not low since brightness is correlated
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--hidden-dim", type=int, default=HIDDEN_DIM)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--np-reg-lambda", type=float, default=NP_REG_LAMBDA)
-    parser.add_argument("--o-reg-lambda", type=float, default=O_REG_LAMBDA)
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY)
     parser.add_argument("--dropout", type=float, default=DROPOUT)
     parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE)
     parser.add_argument("--batch-norm", action="store_true", default=BATCH_NORM)
     parser.add_argument("--layer-norm", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--spectrum-json-dir", type=str, default=DEFAULT_SPECTRUM_JSON_DIR)
 
     return parser.parse_args()
 
@@ -51,38 +46,13 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 def normperserving_regularization(data, features, np_reg_lambda):
-    """
-    Computes the norm-preserving regularization penalty.
-    Penalizes differences between the norm of input data and the norm of output features.
-    """
 
     data_norm = torch.norm(data.view(data.size(0), -1), p=2, dim=1)
+    # data_norm = torch.full((data.size(0),), X_MEAN_NORM, dtype=data.dtype, device=data.device) # Fixed norm ablation
     features_norm = torch.norm(features.view(features.size(0), -1), p=2, dim=1)
     norm_diff_loss = F.mse_loss(data_norm, features_norm)
     
     return np_reg_lambda * norm_diff_loss
-
-def orthogonal_regularization(weight, o_reg_lambda):
-    """
-    Computes the orthogonal regularization penalty: 
-    L = lambda * ||W^T W - I||_F^2
-    """
-
-    sym = torch.mm(weight.t(), weight)
-    identity = torch.eye(sym.size(0), device=weight.device)
-    loss_ortho = torch.norm(sym - identity, p='fro')**2
-    
-    return o_reg_lambda * loss_ortho
-
-
-def get_cifar10_normalization_tensors(device):
-    mean = torch.tensor(CIFAR10_MEAN, device=device).view(1, 3, 1, 1)
-    std = torch.tensor(CIFAR10_STD, device=device).view(1, 3, 1, 1)
-    return mean, std
-
-
-def normalize_batch(data, mean, std):
-    return (data - mean) / std
 
 
 def augment_batch_on_gpu(data):
@@ -101,9 +71,9 @@ def augment_batch_on_gpu(data):
     return torch.where(flip_mask.view(-1, 1, 1, 1), flipped, cropped)
 
 
-class SLFN_CIFAR(nn.Module):
+class SNN_CIFAR(nn.Module):
     def __init__(self, hidden_dim, dropout, use_batch_norm, use_layer_norm):
-        super(SLFN_CIFAR, self).__init__()
+        super(SNN_CIFAR, self).__init__()
 
         input_dim = 3 * 32 * 32
         output_dim = 10
@@ -150,17 +120,19 @@ def dataset_to_device_tensors(dataset, device, indices=None):
     return x, y
 
 
-def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_reg_lambda, o_reg_lambda, mean, std):
+def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_reg_lambda):
     model.train()
     n_samples = x_train.size(0)
     permutation = torch.randperm(n_samples, device=x_train.device)
     epoch_loss = 0.0
+    mean = torch.tensor((0.4914, 0.4822, 0.4465), device=x_train.device).view(1, 3, 1, 1)
+    std = torch.tensor((0.2023, 0.1994, 0.2010), device=x_train.device).view(1, 3, 1, 1)
 
     for batch_start in range(0, n_samples, batch_size):
         idx = permutation[batch_start : batch_start + batch_size]
         data = x_train[idx]
         target = y_train[idx]
-        model_input = normalize_batch(augment_batch_on_gpu(data), mean, std)
+        model_input = (augment_batch_on_gpu(data) - mean) / std
 
         optimizer.zero_grad()
         features = model.forward_features(model_input)
@@ -169,8 +141,6 @@ def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_re
 
         if np_reg_lambda > 0:
             loss = loss + normperserving_regularization(model_input, features, np_reg_lambda)
-        if o_reg_lambda > 0:
-            loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
 
         loss.backward()
         optimizer.step()
@@ -201,24 +171,36 @@ def evaluate_tensor_split(model, x, y, split_name="Validation"):
     return test_loss, accuracy
 
 
-def compute_singular_values(weight):
-    with torch.no_grad():
-        return torch.linalg.svdvals(weight).float().cpu()
+@torch.no_grad()
+def compute_hidden_metrics(model, x, batch_size, tau):
+    model.eval()
+    n_samples = x.size(0)
+    use_size = min(batch_size, n_samples)
+    xb = x[:use_size]
+    features = model.forward_features(xb)
+    cov = features.t().mm(features) / use_size
 
+    eigvals = torch.linalg.eigvalsh(cov)
+    sigma_max = torch.sqrt(eigvals.max() * use_size)
+    tol = sigma_max * features.size(1) * 1e-7
 
-def save_singular_values_json(singular_values, output_path, stage, epoch, weight_shape):
-    output_dir = os.path.dirname(output_path)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
+    algebraic_rank = torch.linalg.matrix_rank(features, tol=tol).item()
+    trace = torch.trace(cov)
+    fro_norm = torch.norm(cov, p="fro")
+    soft_rank = (trace * trace / (fro_norm * fro_norm)).item()
+    soft_rank_tau = (eigvals >= tau).sum().item()
 
-    payload = {
-        "stage": stage,
-        "epoch": epoch,
-        "weight_shape": list(weight_shape),
-        "singular_values": [float(value) for value in singular_values.tolist()],
-    }
-    with open(output_path, "w") as f:
-        json.dump(payload, f, indent=2)
+    eigvals = torch.clamp(eigvals, min=0)
+    eigvals_sum = eigvals.sum()
+    if eigvals_sum > 0:
+        probs = eigvals / eigvals_sum
+        entropy = -(probs * torch.log(probs + 1e-12)).sum()
+        effective_rank = torch.exp(entropy).item()
+    else:
+        effective_rank = 0.0
+
+    singular_values = torch.linalg.svdvals(cov)
+    return singular_values, algebraic_rank, soft_rank, soft_rank_tau, effective_rank
 
 
 
@@ -241,13 +223,14 @@ def main():
     x_train, y_train = dataset_to_device_tensors(full_train_dataset, device, train_indices)
     x_val_raw, y_val = dataset_to_device_tensors(val_base_dataset, device, val_indices)
     x_test_raw, y_test = dataset_to_device_tensors(test_base_dataset, device)
-    mean, std = get_cifar10_normalization_tensors(device)
-    x_val = normalize_batch(x_val_raw, mean, std)
-    x_test = normalize_batch(x_test_raw, mean, std)
+    mean = torch.tensor((0.4914, 0.4822, 0.4465), device=device).view(1, 3, 1, 1)
+    std = torch.tensor((0.2023, 0.1994, 0.2010), device=device).view(1, 3, 1, 1)
+    x_val = (x_val_raw - mean) / std
+    x_test = (x_test_raw - mean) / std
     del x_val_raw
     del x_test_raw
 
-    model = SLFN_CIFAR(args.hidden_dim, args.dropout, args.batch_norm, args.layer_norm).to(device)
+    model = SNN_CIFAR(args.hidden_dim, args.dropout, args.batch_norm, args.layer_norm).to(device)
 
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     min_lr = 1e-8
@@ -261,20 +244,7 @@ def main():
 
     best_val_loss = float("inf")
     best_accuracy = 0.0
-    best_epoch = None
     best_model_state = copy.deepcopy(model.state_dict())
-
-    spectrum_dir = args.spectrum_json_dir
-    before_train_path = os.path.join(spectrum_dir, "spectrum_before_training.json")
-    singular_values = compute_singular_values(model.first_linear.weight)
-    save_singular_values_json(
-        singular_values,
-        before_train_path,
-        stage="before_training",
-        epoch=0,
-        weight_shape=model.first_linear.weight.shape,
-    )
-    print(f"Saved singular value spectrum to {before_train_path}")
     
     for epoch in range(1,1001):
         train_loss = train_one_epoch(
@@ -285,9 +255,6 @@ def main():
             y_train=y_train,
             batch_size=args.batch_size,
             np_reg_lambda=args.np_reg_lambda,
-            o_reg_lambda=args.o_reg_lambda,
-            mean=mean,
-            std=std,
         )
 
         print(f"Epoch {epoch}: Train loss {train_loss:.6f}")
@@ -297,23 +264,11 @@ def main():
             best_val_loss = val_loss
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            best_epoch = epoch
             best_model_state = copy.deepcopy(model.state_dict())
 
         scheduler.step(val_loss)
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Epoch {epoch}: Learning rate {current_lr:.2e}")
-        if epoch == 100:
-            epoch_100_path = os.path.join(spectrum_dir, "spectrum_epoch_100.json")
-            singular_values = compute_singular_values(model.first_linear.weight)
-            save_singular_values_json(
-                singular_values,
-                epoch_100_path,
-                stage="epoch_100",
-                epoch=epoch,
-                weight_shape=model.first_linear.weight.shape,
-            )
-            print(f"Saved singular value spectrum to {epoch_100_path}")
         if current_lr <= 2*min_lr:
             print("Minimum learning rate reached. Stopping training.")
             break
@@ -321,22 +276,11 @@ def main():
     # Evaluate test accuracy from the checkpoint selected by best validation accuracy.
     model.load_state_dict(best_model_state)
     test_loss, test_accuracy = evaluate_tensor_split(model, x_test, y_test, split_name="Test")
-    best_path = os.path.join(spectrum_dir, "spectrum_best_val.json")
-    singular_values = compute_singular_values(model.first_linear.weight)
-    save_singular_values_json(
-        singular_values,
-        best_path,
-        stage="best_val",
-        epoch=best_epoch,
-        weight_shape=model.first_linear.weight.shape,
-    )
-    print(f"Saved singular value spectrum to {best_path}")
 
     print(
         f"Run finished with arguments: \nbatch_size={args.batch_size}\n"
         f"hidden_dim={args.hidden_dim}\n"
         f"np_reg_lambda={args.np_reg_lambda}\n"
-        f"o_reg_lambda={args.o_reg_lambda}\n"
         f"weight_degay={args.weight_decay}\n"
         f"dropout={args.dropout}\n"
         f"batchnorm={args.batch_norm}\n"
@@ -348,6 +292,24 @@ def main():
     print(f"Best val accuracy: {best_accuracy:.2f}%")
     print(f"Final test loss: {test_loss:.6f}")
     print(f"Final test accuracy: {test_accuracy:.2f}%")
+
+
+    # Singular values
+    singular_values, algebraic_rank, soft_rank, soft_rank_tau, effective_rank = compute_hidden_metrics(
+        model, x_test, batch_size=8192, tau=0.5
+    )
+    singular_values = singular_values.detach().cpu().numpy()
+    print("Hidden representation singular values (H^T H / N):")
+    print(singular_values)
+    print(f"Algebraic rank (tol=sigma_max * d * 1e-7): {algebraic_rank}")
+    print(f"Soft rank r(H): {soft_rank:.6f}")
+    print(f"Soft rank_tau(H), tau=0.5: {soft_rank_tau}")
+    print(f"Effective rank (entropy): {effective_rank:.6f}")
+
+    singular_values = np.sort(singular_values)[::-1]
+    os.makedirs("results", exist_ok=True)
+    with open("results/cifar_hidden_singular_values.json", "w", encoding="utf-8") as f:
+        json.dump(singular_values.tolist(), f)
 
 
 if __name__ == "__main__":
