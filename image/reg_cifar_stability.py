@@ -12,7 +12,6 @@ import torch.nn.functional as F
 HIDDEN_DIM = 8192 # [8, 32, 128, 512, 2048, 8192]
 BATCH_SIZE = 128 # [64, 128, 256]
 NP_REG_LAMBDA = 0 # [0.01, 0.1, 1]
-O_REG_LAMBDA = 0 # []
 WEIGHT_DECAY=0
 DROPOUT=0
 BATCH_NORM=False
@@ -27,7 +26,6 @@ def parse_args():
     parser.add_argument("--hidden-dim", type=int, default=HIDDEN_DIM)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--np-reg-lambda", type=float, default=NP_REG_LAMBDA)
-    parser.add_argument("--o-reg-lambda", type=float, default=O_REG_LAMBDA)
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY)
     parser.add_argument("--dropout", type=float, default=DROPOUT)
     parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE)
@@ -59,56 +57,99 @@ def normperserving_regularization(data, features, np_reg_lambda):
     
     return np_reg_lambda * norm_diff_loss
 
-def orthogonal_regularization(weight, o_reg_lambda):
-    """
-    Computes the orthogonal regularization penalty: 
-    L = lambda * ||W^T W - I||_F^2
-    """
-
-    sym = torch.mm(weight.t(), weight)
-    identity = torch.eye(sym.size(0), device=weight.device)
-    loss_ortho = torch.norm(sym - identity, p='fro')**2
-    
-    return o_reg_lambda * loss_ortho
-
-
 loss_landscapes = []
 gradient_stabilities = []
 gradient_relative_stabilities = []
 effective_betas = []
 
 
-def calculate_ll_n_gp(model, model_input, target, base_lr, np_reg_lambda):
+def get_adamw_effective_update(optimizer, model):
+    """
+    Reconstruct the per-parameter AdamW update vector using the current
+    optimizer state (moments accumulated up to but not including this step).
+    """
+    effective_update = {}
+    for group in optimizer.param_groups:
+        lr = group['lr']
+        eps = group['eps']
+        beta1, beta2 = group['betas']
+
+        for p in group['params']:
+            if p.grad is None:
+                continue
+            state = optimizer.state[p]
+
+            if len(state) == 0:
+                # First step fallback to scaled raw gradient
+                effective_update[p] = lr * p.grad.clone()
+                continue
+
+            step = state['step']
+            step_val = step.item() if isinstance(step, torch.Tensor) else step
+
+            exp_avg = state['exp_avg']       
+            exp_avg_sq = state['exp_avg_sq'] 
+
+            bias_corr1 = 1.0 - beta1 ** step_val
+            bias_corr2 = 1.0 - beta2 ** step_val
+
+            m_hat = exp_avg / bias_corr1
+            v_hat = exp_avg_sq / bias_corr2
+
+            update = lr * m_hat / (v_hat.sqrt() + eps)
+            effective_update[p] = update
+
+    return effective_update
+
+
+def calculate_ll_n_gp(model, optimizer, model_input, target, np_reg_lambda):
     was_training = model.training
 
     # Expect gradients to be present for all trainable parameters
     assert any(p.grad is not None for p in model.parameters()), "Expected gradients to be present"
 
-    # Save original gradients (will be needed by optimizer.step() after this function)
-    orig_grads = {name: p.grad.clone() if p.grad is not None else None for name, p in model.named_parameters()}
-    # Use a fixed direction equal to the original gradient.
-    grad_direction = {name: g.clone() if g is not None else None for name, g in orig_grads.items()}
+    # Save original gradients (needed by optimizer.step() after this function)
+    orig_grads = {
+        name: p.grad.clone() if p.grad is not None else None
+        for name, p in model.named_parameters()
+    }
+
+    # Map parameter objects to names for effective update extraction
+    name_to_param = dict(model.named_parameters())
+    effective_update_by_param = get_adamw_effective_update(optimizer, model)
+
+    effective_update = {
+        name: effective_update_by_param[p]
+        for name, p in name_to_param.items()
+        if p in effective_update_by_param
+    }
 
     orig_state = {k: v.clone() for k, v in model.state_dict().items()}
+
+    # Compute step norm for accurate beta-smoothness denominator
+    probe_scale = 0.1  
+    step_norm = math.sqrt(
+        sum((probe_scale * u).pow(2).sum().item() for u in effective_update.values())
+    )
+    if step_norm < 1e-12:
+        step_norm = 1e-12
+
+    # Offset parameters backward initially to straddle the current point
+    with torch.no_grad():
+        for name, p in model.named_parameters():
+            u = effective_update.get(name)
+            if u is not None:
+                p.data.sub_(probe_scale * u)
 
     losses_for_steps = []
     grad_norms_for_steps = []
     beta_values = []
     prev_grads = None
 
-    # Apply initial 0.5*lr step along the fixed original gradient direction.
-    with torch.no_grad():
-        for name, p in model.named_parameters():
-            g = grad_direction.get(name)
-            if g is not None:
-                p.data = p.data - 0.1 * base_lr * g
-
-    # Evaluate loss and gradient norm at each of 36 steps
+    # Walk 40 steps along the true effective update direction
     for i in range(40):
-
         features = model.forward_features(model_input)
         logits = model.second_linear(features)
-
         loss_val = F.cross_entropy(logits, target)
 
         if np_reg_lambda > 0:
@@ -116,47 +157,44 @@ def calculate_ll_n_gp(model, model_input, target, base_lr, np_reg_lambda):
 
         losses_for_steps.append(loss_val.item())
 
-        # Clear old gradients
+        # Clear old gradients and perform a local backward pass
         for p in model.parameters():
             p.grad = None
         loss_val.backward()
 
-        # Compute Euclidean distance between original grad and current grad.
-        grad_distance = 0.0
-        for name, p in model.named_parameters():
-            if p.grad is not None and name in orig_grads and orig_grads[name] is not None:
-                grad_diff = p.grad - orig_grads[name]
-                grad_distance += (grad_diff ** 2).sum().item()
-        grad_distance = grad_distance ** 0.5
+        # Compute Euclidean distance between original grad and current grad
+        grad_distance = math.sqrt(sum(
+            ((p.grad - orig_grads[name]) ** 2).sum().item()
+            for name, p in model.named_parameters()
+            if p.grad is not None and orig_grads.get(name) is not None
+        ))
         grad_norms_for_steps.append(grad_distance)
 
-
-        # Effective beta smoothness estimate: adjacent gradient differences divided by 0.1.
+        # Calculate effective beta smoothness using the real displacement norm
         if prev_grads is None:
             beta_values.append(float("nan"))
         else:
-            adj_grad_distance = 0.0
+            adj_grad_distance = math.sqrt(sum(
+                ((p.grad - prev_grads[name]) ** 2).sum().item()
+                for name, p in model.named_parameters()
+                if p.grad is not None and prev_grads.get(name) is not None
+            ))
+            beta_values.append(adj_grad_distance / step_norm)
+
+        prev_grads = {
+            name: p.grad.clone() if p.grad is not None else None
+            for name, p in model.named_parameters()
+        }
+
+        # Advance along the update vector
+        with torch.no_grad():
             for name, p in model.named_parameters():
-                if p.grad is not None and name in prev_grads and prev_grads[name] is not None:
-                    grad_diff = p.grad - prev_grads[name]
-                    adj_grad_distance += (grad_diff ** 2).sum().item()
-            adj_grad_distance = adj_grad_distance ** 0.5
-            beta_values.append(adj_grad_distance / 0.1)
+                u = effective_update.get(name)
+                if u is not None:
+                    p.data.sub_(probe_scale * u)
 
-        prev_grads = {name: p.grad.clone() if p.grad is not None else None for name, p in model.named_parameters()}
-
-        # Advance by 0.1*lr for next step (skip after last), still along the fixed direction.
-        if i != 39:
-            with torch.no_grad():
-                for name, p in model.named_parameters():
-                    g = grad_direction.get(name)
-                    if g is not None:
-                        p.data = p.data - 0.1 * base_lr * g
-
-    # Restore original parameters
+    # Restore original parameters and gradients
     model.load_state_dict(orig_state)
-
-    # Restore original gradients for optimizer.step()
     for name, p in model.named_parameters():
         if name in orig_grads:
             p.grad = orig_grads[name]
@@ -247,7 +285,7 @@ def dataset_to_device_tensors(dataset, device, indices=None):
     return x, y
 
 
-def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_reg_lambda, o_reg_lambda, mean, std):
+def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_reg_lambda, mean, std):
     model.train()
     n_samples = x_train.size(0)
     permutation = torch.randperm(n_samples, device=x_train.device)
@@ -266,14 +304,11 @@ def train_one_epoch(model, optimizer, epoch, x_train, y_train, batch_size, np_re
 
         if np_reg_lambda > 0:
             loss = loss + normperserving_regularization(model_input, features, np_reg_lambda)
-        if o_reg_lambda > 0:
-            loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
 
         loss.backward()
         batch_idx = batch_start // batch_size
-        if batch_idx % 10 == 0:
-            current_lr = optimizer.param_groups[0]["lr"]
-            calculate_ll_n_gp(model, model_input, target, current_lr, np_reg_lambda)
+        if batch_idx % 100 == 0:
+            calculate_ll_n_gp(model, optimizer, model_input, target, np_reg_lambda)
         optimizer.step()
 
         epoch_loss += loss.item() * data.size(0)
@@ -346,7 +381,6 @@ def main():
             y_train=y_train,
             batch_size=args.batch_size,
             np_reg_lambda=args.np_reg_lambda,
-            o_reg_lambda=args.o_reg_lambda,
             mean=mean,
             std=std,
         )
@@ -374,7 +408,6 @@ def main():
         f"Run finished with arguments: \nbatch_size={args.batch_size}\n"
         f"hidden_dim={args.hidden_dim}\n"
         f"np_reg_lambda={args.np_reg_lambda}\n"
-        f"o_reg_lambda={args.o_reg_lambda}\n"
         f"weight_degay={args.weight_decay}\n"
         f"dropout={args.dropout}\n"
         f"batchnorm={args.batch_norm}\n"
@@ -397,7 +430,7 @@ def main():
         "gradient_stabilities": gradient_stabilities,
         "effective_betas": effective_betas,
     }
-    save_metrics_path = "stability_metrics_np.json"
+    save_metrics_path = "results/stability_metrics.json"
     with open(save_metrics_path, "w") as f:
         json.dump(out_metrics, f, indent=2)
     print(f"Saved metrics to {save_metrics_path}")
