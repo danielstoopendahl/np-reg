@@ -13,21 +13,21 @@ import random
 
 
 DEFAULT_DATASET_PATH = os.path.join(os.path.dirname(__file__), "data", "imdb_hf")
-
+X_MEAN_NORM = 26.724243
+X_STD_NORM = 17.014002
 
 def parser():
     parser = argparse.ArgumentParser(description="BoW embedder + MLP for IMDB sentiment")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=3e-6)
-    parser.add_argument("--hidden-dim", type=int, default=512)
+    parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--dropout", type=float, default=0)
     parser.add_argument("--weight-decay", type=float, default=0)
-    parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--batch-norm", action="store_true", default=False)
     parser.add_argument("--layer-norm", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--vocab-size", type=int, default=10000)
+    parser.add_argument("--vocab-size", type=int, default=50000)
     parser.add_argument("--dataset-path", type=str, default=DEFAULT_DATASET_PATH)
 
     return parser.parse_args()
@@ -44,19 +44,13 @@ def set_seed(seed):
 
 def normperserving_regularization(data, features, reg_lambda):
     data_norm = torch.norm(data.view(data.size(0), -1), p=2, dim=1)
+    # data_norm = torch.full((data.size(0),), X_MEAN_NORM, dtype=data.dtype, device=data.device) # Fixed norm ablation
     features_norm = torch.norm(features.view(features.size(0), -1), p=2, dim=1)
     norm_diff_loss = F.mse_loss(data_norm, features_norm)
     return reg_lambda * norm_diff_loss
 
 
-def orthogonal_regularization(weight, reg_lambda):
-    sym = torch.mm(weight, weight.t())
-    identity = torch.eye(sym.size(0), device=weight.device)
-    loss_ortho = torch.norm(sym - identity, p="fro") ** 2
-    return reg_lambda * loss_ortho
-
-
-class SLFN_IMDB(nn.Module):
+class SNN_IMDB(nn.Module):
     def __init__(self, embedding_dim: int, hidden_dim: int, mlp_dropout: float, use_batch_norm: bool, use_layer_norm: bool):
         super().__init__()
         num_classes = 2
@@ -159,7 +153,7 @@ def build_dataloaders_from_bow(batch_size: int, max_vocab_size: int, dataset_pat
     return train_loader, val_loader, test_loader, len(vocab)
 
 
-def train(model, dataloader, criterion, optimizer, device, o_reg_lambda, np_reg_lambda):
+def train(model, dataloader, criterion, optimizer, device, np_reg_lambda):
     model.train()
 
     total_loss = 0.0
@@ -178,8 +172,6 @@ def train(model, dataloader, criterion, optimizer, device, o_reg_lambda, np_reg_
 
         if np_reg_lambda > 0:
             loss = loss + normperserving_regularization(bow_embedding, features, np_reg_lambda)
-        if o_reg_lambda > 0:
-            loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
 
         loss.backward()
         optimizer.step()
@@ -228,7 +220,7 @@ def main():
         dataset_path=args.dataset_path,
     )
 
-    model = SLFN_IMDB(
+    model = SNN_IMDB(
         embedding_dim=vocab_size,
         hidden_dim=args.hidden_dim,
         mlp_dropout=args.dropout,
@@ -258,7 +250,6 @@ def main():
             criterion,
             optimizer,
             device,
-            args.o_reg_lambda,
             args.np_reg_lambda,
         )
         val_loss, val_acc = test(

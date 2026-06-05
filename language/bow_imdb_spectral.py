@@ -3,7 +3,6 @@ from collections import Counter
 import json
 import os
 import tempfile
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,28 +10,26 @@ from datasets import load_dataset
 from datasets import load_from_disk
 from torch.utils.data import DataLoader, TensorDataset
 import random
+import numpy as np
 
 
 DEFAULT_DATASET_PATH = os.path.join(os.path.dirname(__file__), "data", "imdb_hf")
-DEFAULT_RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
-DEFAULT_SPECTRUM_JSON_DIR = os.path.join(DEFAULT_RESULTS_DIR, "spectra")
-
+X_MEAN_NORM = 26.724243
+X_STD_NORM = 17.014002
 
 def parser():
     parser = argparse.ArgumentParser(description="BoW embedder + MLP for IMDB sentiment")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=3e-6)
-    parser.add_argument("--hidden-dim", type=int, default=512)
+    parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--dropout", type=float, default=0)
     parser.add_argument("--weight-decay", type=float, default=0)
-    parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
     parser.add_argument("--batch-norm", action="store_true", default=False)
     parser.add_argument("--layer-norm", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--vocab-size", type=int, default=10000)
+    parser.add_argument("--vocab-size", type=int, default=50000)
     parser.add_argument("--dataset-path", type=str, default=DEFAULT_DATASET_PATH)
-    parser.add_argument("--spectrum-json-dir", type=str, default=DEFAULT_SPECTRUM_JSON_DIR)
 
     return parser.parse_args()
 
@@ -48,39 +45,12 @@ def set_seed(seed):
 
 def normperserving_regularization(data, features, reg_lambda):
     data_norm = torch.norm(data.view(data.size(0), -1), p=2, dim=1)
+    # data_norm = torch.full((data.size(0),), X_MEAN_NORM, dtype=data.dtype, device=data.device) # Fixed norm ablation
     features_norm = torch.norm(features.view(features.size(0), -1), p=2, dim=1)
     norm_diff_loss = F.mse_loss(data_norm, features_norm)
     return reg_lambda * norm_diff_loss
 
-
-def orthogonal_regularization(weight, reg_lambda):
-    sym = torch.mm(weight, weight.t())
-    identity = torch.eye(sym.size(0), device=weight.device)
-    loss_ortho = torch.norm(sym - identity, p="fro") ** 2
-    return reg_lambda * loss_ortho
-
-
-def compute_singular_values(weight: torch.Tensor) -> torch.Tensor:
-    with torch.no_grad():
-        return torch.linalg.svdvals(weight).float().cpu()
-
-
-def save_singular_values_json(singular_values, output_path, stage, epoch, weight_shape):
-    output_dir = os.path.dirname(output_path)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-
-    payload = {
-        "stage": stage,
-        "epoch": epoch,
-        "weight_shape": list(weight_shape),
-        "singular_values": [float(value) for value in singular_values.tolist()],
-    }
-    with open(output_path, "w") as f:
-        json.dump(payload, f, indent=2)
-
-
-class SLFN_IMDB(nn.Module):
+class SNN_IMDB(nn.Module):
     def __init__(self, embedding_dim: int, hidden_dim: int, mlp_dropout: float, use_batch_norm: bool, use_layer_norm: bool):
         super().__init__()
         num_classes = 2
@@ -183,7 +153,7 @@ def build_dataloaders_from_bow(batch_size: int, max_vocab_size: int, dataset_pat
     return train_loader, val_loader, test_loader, len(vocab)
 
 
-def train(model, dataloader, criterion, optimizer, device, o_reg_lambda, np_reg_lambda):
+def train(model, dataloader, criterion, optimizer, device, np_reg_lambda):
     model.train()
 
     total_loss = 0.0
@@ -202,8 +172,6 @@ def train(model, dataloader, criterion, optimizer, device, o_reg_lambda, np_reg_
 
         if np_reg_lambda > 0:
             loss = loss + normperserving_regularization(bow_embedding, features, np_reg_lambda)
-        if o_reg_lambda > 0:
-            loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
 
         loss.backward()
         optimizer.step()
@@ -239,6 +207,37 @@ def test(model, dataloader, criterion, device):
 
     return total_loss / total, correct / total
 
+@torch.no_grad()
+def compute_hidden_metrics(model, x, batch_size, tau):
+    model.eval()
+    n_samples = x.size(0)
+    use_size = min(batch_size, n_samples)
+    xb = x[:use_size]
+    features = model.forward_features(xb)
+    cov = features.t().mm(features) / use_size
+
+    eigvals = torch.linalg.eigvalsh(cov)
+    sigma_max = torch.sqrt(eigvals.max() * use_size)
+    tol = sigma_max * features.size(1) * 1e-7
+
+    algebraic_rank = torch.linalg.matrix_rank(features, tol=tol).item()
+    trace = torch.trace(cov)
+    fro_norm = torch.norm(cov, p="fro")
+    soft_rank = (trace * trace / (fro_norm * fro_norm)).item()
+    soft_rank_tau = (eigvals >= tau).sum().item()
+
+    eigvals = torch.clamp(eigvals, min=0)
+    eigvals_sum = eigvals.sum()
+    if eigvals_sum > 0:
+        probs = eigvals / eigvals_sum
+        entropy = -(probs * torch.log(probs + 1e-12)).sum()
+        effective_rank = torch.exp(entropy).item()
+    else:
+        effective_rank = 0.0
+
+    singular_values = torch.linalg.svdvals(cov)
+    return singular_values, algebraic_rank, soft_rank, soft_rank_tau, effective_rank
+
 
 def main():
     torch.set_float32_matmul_precision('high')
@@ -252,7 +251,7 @@ def main():
         dataset_path=args.dataset_path,
     )
 
-    model = SLFN_IMDB(
+    model = SNN_IMDB(
         embedding_dim=vocab_size,
         hidden_dim=args.hidden_dim,
         mlp_dropout=args.dropout,
@@ -267,7 +266,6 @@ def main():
 
     best_val_acc = -1.0
     best_val_loss = float("inf")
-    best_epoch = None
     epochs_without_loss_improvement = 0
     early_stop_patience = 16
     saved_checkpoint = False
@@ -283,7 +281,6 @@ def main():
             criterion,
             optimizer,
             device,
-            args.o_reg_lambda,
             args.np_reg_lambda,
         )
         val_loss, val_acc = test(
@@ -314,7 +311,6 @@ def main():
             best_val_acc = val_acc
             torch.save(model.state_dict(), save_path)
             saved_checkpoint = True
-            best_epoch = epoch
             print(f"Saved new best model to {save_path}")
 
     try:
@@ -329,18 +325,24 @@ def main():
             device,
         )
         print(f"Test loss={test_loss:.4f} | Test accuracy={test_acc * 100:.2f}%")
-
-        spectrum_dir = args.spectrum_json_dir
-        best_path = os.path.join(spectrum_dir, "spectrum_best_val.json")
-        singular_values = compute_singular_values(model.first_linear.weight)
-        save_singular_values_json(
-            singular_values,
-            best_path,
-            stage="best_val",
-            epoch=best_epoch,
-            weight_shape=model.first_linear.weight.shape,
+        xb, _ = next(iter(test_loader))
+        xb = xb.to(device)
+        singular_values, algebraic_rank, soft_rank, soft_rank_tau, effective_rank = compute_hidden_metrics(
+            model, xb, batch_size=2048, tau=0.5
         )
-        print(f"Saved singular value spectrum to {best_path}")
+        singular_values = singular_values.detach().cpu().numpy()
+        print("Hidden representation singular values (H^T H / N):")
+        print(singular_values)
+        print(f"Algebraic rank (tol=sigma_max * d * 1e-7): {algebraic_rank}")
+        print(f"Soft rank r(H): {soft_rank:.6f}")
+        print(f"Soft rank_tau(H), tau=0.5: {soft_rank_tau}")
+        print(f"Effective rank (entropy): {effective_rank:.6f}")
+
+        singular_values = np.sort(singular_values)[::-1]
+        os.makedirs("results", exist_ok=True)
+        with open("results/imdb_hidden_singular_values.json", "w", encoding="utf-8") as f:
+            json.dump(singular_values.tolist(), f)
+
     finally:
         if os.path.exists(save_path):
             os.remove(save_path)
