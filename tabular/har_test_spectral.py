@@ -1,33 +1,26 @@
 import argparse
-import copy
-import json
-import os
 import random
 
+import json
 import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
+import os
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train an SLFN on UCI HAR")
+    parser = argparse.ArgumentParser(description="Train an SNN on UCI HAR")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--hidden-dim", type=int, default=8192)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--np-reg-lambda", type=float, default=0)
-    parser.add_argument("--o-reg-lambda", type=float, default=0)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0)
     parser.add_argument("--dropout", type=float, default=0)
     parser.add_argument("--batch-norm", action="store_true", default=False)
     parser.add_argument("--layer-norm", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument(
-        "--spectrum-json-dir",
-        type=str,
-        default=os.path.join(os.path.dirname(__file__), "results", "spectra"),
-    )
     return parser.parse_args()
 
 def set_seed(seed):
@@ -48,35 +41,7 @@ def normperserving_regularization(data, features, reg_lambda):
     
     return reg_lambda * norm_diff_loss
 
-def orthogonal_regularization(weight, o_reg_lambda):
-    sym = torch.mm(weight.t(), weight)
-    identity = torch.eye(sym.size(0), device=weight.device)
-    loss_ortho = torch.norm(sym - identity, p='fro')**2
-    
-    return o_reg_lambda * loss_ortho
-
-
-def compute_singular_values(weight: torch.Tensor) -> torch.Tensor:
-    with torch.no_grad():
-        return torch.linalg.svdvals(weight).float().cpu()
-
-
-def save_singular_values_json(singular_values, output_path, stage, epoch, weight_shape, fold):
-    output_dir = os.path.dirname(output_path)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-
-    payload = {
-        "stage": stage,
-        "epoch": epoch,
-        "fold": fold,
-        "weight_shape": list(weight_shape),
-        "singular_values": [float(value) for value in singular_values.tolist()],
-    }
-    with open(output_path, "w") as f:
-        json.dump(payload, f, indent=2)
-
-class SLFN(nn.Module):
+class SNN(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_classes, dropout, use_batch_norm, use_layer_norm):
         super().__init__()
         self.first_linear = nn.Linear(input_dim, hidden_dim)
@@ -104,7 +69,7 @@ class SLFN(nn.Module):
         return logits, features, x
 
 
-def train_one_epoch(model, optimizer, loss_fn, x_train, y_train, batch_size, device, np_reg_lambda, o_reg_lambda):
+def train_one_epoch(model, optimizer, loss_fn, x_train, y_train, batch_size, device, np_reg_lambda):
     model.train()
     n_samples = x_train.size(0)
     permutation = torch.randperm(n_samples, device=device)
@@ -121,8 +86,6 @@ def train_one_epoch(model, optimizer, loss_fn, x_train, y_train, batch_size, dev
         loss = loss_fn(logits, yb)
         if np_reg_lambda > 0:
             loss = loss + normperserving_regularization(inputs, features, np_reg_lambda)
-        if o_reg_lambda > 0:
-            loss = loss + orthogonal_regularization(model.first_linear.weight, o_reg_lambda)
         loss.backward()
         optimizer.step()
 
@@ -140,6 +103,38 @@ def evaluate(model, x, y, loss_fn):
     loss = loss_fn(logits, y)
     acc = (preds == y).float().mean().item()
     return acc, loss
+
+
+@torch.no_grad()
+def compute_hidden_metrics(model, x, batch_size, tau):
+    model.eval()
+    n_samples = x.size(0)
+    use_size = min(batch_size, n_samples)
+    xb = x[:use_size]
+    features = model.forward_features(xb)
+    cov = features.t().mm(features) / use_size
+
+    eigvals = torch.linalg.eigvalsh(cov)
+    sigma_max = torch.sqrt(eigvals.max() * use_size)
+    tol = sigma_max * features.size(1) * 1e-7
+
+    algebraic_rank = torch.linalg.matrix_rank(features, tol=tol).item()
+    trace = torch.trace(cov)
+    fro_norm = torch.norm(cov, p="fro")
+    soft_rank = (trace * trace / (fro_norm * fro_norm)).item()
+    soft_rank_tau = (eigvals >= tau).sum().item()
+
+    eigvals = torch.clamp(eigvals, min=0)
+    eigvals_sum = eigvals.sum()
+    if eigvals_sum > 0:
+        probs = eigvals / eigvals_sum
+        entropy = -(probs * torch.log(probs + 1e-12)).sum()
+        effective_rank = torch.exp(entropy).item()
+    else:
+        effective_rank = 0.0
+
+    singular_values = torch.linalg.svdvals(cov)
+    return singular_values, algebraic_rank, soft_rank, soft_rank_tau, effective_rank
 
 
 def main():
@@ -188,7 +183,7 @@ def main():
         input_dim = x_train.size(1)
         num_classes = int(torch.max(y_train).item() + 1)
         loss_fn = nn.CrossEntropyLoss()
-        model = SLFN(
+        model = SNN(
             input_dim=input_dim,
             hidden_dim=args.hidden_dim,
             num_classes=num_classes,
@@ -200,9 +195,6 @@ def main():
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         val_acc = 0
         val_loss = 0
-        best_val_acc = -1.0
-        best_epoch = None
-        best_model_state = copy.deepcopy(model.state_dict())
 
         for epoch in range(args.epochs):
             train_loss, train_acc = train_one_epoch(
@@ -214,7 +206,6 @@ def main():
                 batch_size=args.batch_size,
                 device=device,
                 np_reg_lambda=args.np_reg_lambda,
-                o_reg_lambda=args.o_reg_lambda,
             )
             val_acc, val_loss = evaluate(model, x_test, y_test, loss_fn)
             print(
@@ -223,28 +214,7 @@ def main():
                 f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
             )
 
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
-                best_epoch = epoch + 1
-                best_model_state = copy.deepcopy(model.state_dict())
-
-            
-
-        model.load_state_dict(best_model_state)
-        spectrum_dir = args.spectrum_json_dir
-        spectrum_path = os.path.join(spectrum_dir, f"spectrum_best_val_fold_{fold_idx + 1}.json")
-        singular_values = compute_singular_values(model.first_linear.weight)
-        save_singular_values_json(
-            singular_values,
-            spectrum_path,
-            stage="best_val",
-            epoch=best_epoch,
-            weight_shape=model.first_linear.weight.shape,
-            fold=fold_idx + 1,
-        )
-        print(f"Saved singular value spectrum to {spectrum_path}")
-
-        val_accs.append(float(best_val_acc))
+        val_accs.append(float(val_acc))
         val_losses.append(float(val_loss))
         print(f"Fold {fold_idx+1}/5: val_acc={val_acc:.6f} val_loss={val_loss:.6f}")
 
@@ -256,6 +226,22 @@ def main():
         f"RESULT mean_val_acc={mean_val_acc:.6f} "
         f"mean_val_loss={mean_val_loss:.6f} test_acc={test_acc:.6f}"
     )
+
+    singular_values, algebraic_rank, soft_rank, soft_rank_tau, effective_rank = compute_hidden_metrics(
+        model, x_test, batch_size=8192, tau=0.5
+    )
+    singular_values = singular_values.detach().cpu().numpy()
+    print("Hidden representation singular values (H^T H / N):")
+    print(singular_values)
+    print(f"Algebraic rank (tol=sigma_max * d * 1e-7): {algebraic_rank}")
+    print(f"Soft rank r(H): {soft_rank:.6f}")
+    print(f"Soft rank_tau(H), tau=0.5: {soft_rank_tau}")
+    print(f"Effective rank (entropy): {effective_rank:.6f}")
+
+    singular_values = np.sort(singular_values)[::-1]
+    os.makedirs("results", exist_ok=True)
+    with open("results/har_hidden_singular_values.json", "w", encoding="utf-8") as f:
+        json.dump(singular_values.tolist(), f)
 
 
 if __name__ == "__main__":
