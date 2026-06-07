@@ -4,7 +4,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import matplotlib.ticker as mticker
 
+PALETTE = {
+    "Vanilla": "#C37238",
+    "BN/LN/None + D + WD": "#926942",
+    "NP-reg": "#789EB8",
+    "NP-reg + D + WD": "#386463",
+}
 
 def plot_finetuning(csv_path: Path, output_path: Path) -> None:
     raw = pd.read_csv(csv_path, header=None)
@@ -41,19 +48,32 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
 
     model_labels = {
         "Vanilla": "Vanilla",
-        "opt": "normalizing + D + WD",
-        "np": "NP",
-        "np + opt": "NP + D + WD",
+        "opt": "BN/LN/None + D + WD",
+        "np": "NP-reg",
+        "np + opt": "NP-reg + D + WD",
     }
     df["model"] = df["model"].map(model_labels).fillna(df["model"])
     marker_styles = {
         "Vanilla": "o",
-        "normalizing + D + WD": "s",
-        "NP": "D",
-        "NP + D + WD": "^",
+        "BN/LN/None + D + WD": "s",
+        "NP-reg": "D",
+        "NP-reg + D + WD": "^",
     }
 
-    sns.set_theme(style="whitegrid")
+    sns.set_theme(
+        style="ticks",
+        context="paper",
+        rc={
+            "font.size": 15,
+            "axes.titlesize": 16,
+            "axes.labelsize": 15,
+            "legend.fontsize": 14,
+            "legend.title_fontsize": 14,
+            "xtick.labelsize": 14,
+            "ytick.labelsize": 14,
+            "axes.grid": False,
+        },
+    )
     fig, (ax, ax2) = plt.subplots(1, 2, figsize=(16, 4), constrained_layout=True)
 
     sns.lineplot(
@@ -62,7 +82,8 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
         y="mean",
         hue="model",
         style="model",
-        markers=marker_styles,
+        markers=True,
+        palette=PALETTE, 
         dashes=False,
         linewidth=2.2,
         markersize=7,
@@ -79,10 +100,14 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
         )
 
     ax.set_xscale("log")
+    ax.xaxis.set_minor_locator(mticker.NullLocator())
+    ax.grid(False)
+    ax.tick_params(axis="both", which="both", direction="out", length=4)
     ax.set_xticks(fraction_labels)
     ax.set_xticklabels(["100%", "30%", "10%", "3%", "1%"])
     ax.set_xlabel("Training data fraction")
-    ax.set_ylabel("Accuracy")
+    ax.set_ylabel("Accuracy (%)")
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
     ax.legend(title="Model")
 
     if "Vanilla" not in df["model"].unique():
@@ -110,7 +135,8 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
         y="pct_increase",
         hue="model",
         style="model",
-        markers=marker_styles,
+        markers=True,
+        palette=PALETTE, 
         dashes=False,
         linewidth=2.2,
         markersize=7,
@@ -124,15 +150,19 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
             g["pct_increase"] - g["pct_increase_std"],
             g["pct_increase"] + g["pct_increase_std"],
             alpha=0.2,
+            color=PALETTE.get(model, None),
         )
 
-    ax2.axhline(0, color="black", linewidth=1)
     ax2.set_xscale("log")
+    ax2.xaxis.set_minor_locator(mticker.NullLocator())
+    ax2.grid(False)
+    ax2.tick_params(axis="both", which="both", direction="out", length=4)
     ax2.set_xticks(fraction_labels)
     ax2.set_xticklabels(["100%", "30%", "10%", "3%", "1%"])
     ax2.set_xlabel("Training data fraction")
     ax2.set_ylabel("% increase over Vanilla")
-    ax2.legend(title="Model")
+    ax2.yaxis.set_major_formatter(mticker.PercentFormatter(decimals=1))
+    ax2.legend(title="Model", loc="upper right")
 
     fig.savefig(output_path, format="pdf")
 

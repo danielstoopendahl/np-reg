@@ -6,26 +6,27 @@ from pathlib import Path
 import re
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATASETS = [
     (
-        REPO_ROOT / "image/results/Exjobb models - CIFAR test.csv",
-        "CIFAR-10 Test Accuracy vs Model Size",
+        REPO_ROOT / "image/results/CIFAR test.csv",
+        "CIFAR-10",
     ),
     (
-        REPO_ROOT / "language/results/Exjobb models - IMDb test.csv",
-        "IMDb Test Accuracy vs Model Size",
+        REPO_ROOT / "language/results/IMDb test.csv",
+        "IMDb",
     ),
     (
-        REPO_ROOT / "tabular/results/Exjobb models - UCI test.csv",
-        "UCI HAR Test Accuracy vs Model Size",
+        REPO_ROOT / "tabular/results/UCI HAR test.csv",
+        "UCI HAR",
     ),
 ]
 
-METHODS = ["Vanilla", "Layer Norm", "Batch Norm", "Weight Decay", "Dropout", "Np-reg"]
+METHODS = ["Vanilla", "Weight Decay", "Dropout", "Layer Norm", "Batch Norm", "NP-reg"]
 
 
 @dataclass
@@ -100,21 +101,24 @@ def parse_csv(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 def plot_csv(csv_path: Path, title: str) -> Path:
     means, stds = parse_csv(csv_path)
     plot_df = means.merge(stds, on=["model_size", "method"])
+    plot_df["method"] = plot_df["method"].replace({"Np-reg": "NP-reg"})
 
     output_path = csv_path.with_name(
-        f"{re.sub(r'[^a-z0-9]+', '_', csv_path.stem.lower()).strip('_')}_accuracy_by_model_size.png"
+        f"{re.sub(r'[^a-z0-9]+', '_', csv_path.stem.lower()).strip('_')}_accuracy_by_model_size.pdf"
     )
 
     palette = {
-        "Vanilla": "#C1CBD9",
+        "Vanilla": "#C37238",
+        "Weight Decay": "#926942",
+        "Dropout": "#386463",
         "Layer Norm": "#C0B76F",
-        "Batch Norm": "#858C51",
-        "Weight Decay": "#A67F5D",
-        "Dropout": "#CAB9A9",
-        "Np-reg": "#88AABF",
+        "Batch Norm": "#829750",
+        "NP-reg": "#789EB8",
     }
 
-    fig, ax = plt.subplots(figsize=(9, 5))
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(16, 5), constrained_layout=True)
+
+    legend_methods = ["Vanilla", "Weight Decay", "Dropout", "Layer Norm", "Batch Norm", "NP-reg"]
 
     sns.lineplot(
         data=plot_df,
@@ -122,10 +126,13 @@ def plot_csv(csv_path: Path, title: str) -> Path:
         y="accuracy",
         hue="method",
         style="method",
+        hue_order=legend_methods,
+        style_order=legend_methods,
         markers=True,
         dashes=False,
-        linewidth=2.5,
-        markersize=7,
+        linewidth=2.7,
+        alpha=0.9,
+        markersize=8,
         palette=palette,
         ax=ax,
     )
@@ -137,28 +144,104 @@ def plot_csv(csv_path: Path, title: str) -> Path:
         s = method_data["std"].to_numpy()
         ax.fill_between(x, y - s, y + s, color=palette[method], alpha=0.18)
 
-    # Add vertical line for #parameters = #datapoints
+    if "Vanilla" not in plot_df["method"].unique():
+        raise ValueError("Could not find 'Vanilla' in method names.")
+
+    vanilla_lookup = plot_df[plot_df["method"] == "Vanilla"][
+        ["model_size", "accuracy", "std"]
+    ].rename(columns={"accuracy": "vanilla_mean", "std": "vanilla_std"})
+
+    diff_df = plot_df.merge(vanilla_lookup, on="model_size", how="left")
+    diff_df["pct_increase"] = (
+        (diff_df["accuracy"] - diff_df["vanilla_mean"]) / diff_df["vanilla_mean"]
+    ) * 100.0
+    diff_df["pct_increase_std"] = 100.0 * np.sqrt(
+        (diff_df["std"] / diff_df["vanilla_mean"]) ** 2
+        + (((diff_df["accuracy"] - diff_df["vanilla_mean"]) * diff_df["vanilla_std"]) ** 2)
+        / (diff_df["vanilla_mean"] ** 4)
+    )
+
+    sns.lineplot(
+        data=diff_df,
+        x="model_size",
+        y="pct_increase",
+        hue="method",
+        style="method",
+        hue_order=legend_methods,
+        style_order=legend_methods,
+        markers=True,
+        dashes=False,
+        linewidth=2.7,
+        alpha=0.9,
+        markersize=8,
+        palette=palette,
+        ax=ax2,
+    )
+
+    for method, method_data in diff_df.groupby("method", sort=False):
+        method_data = method_data.sort_values("model_size")
+        x = method_data["model_size"].to_numpy()
+        y = method_data["pct_increase"].to_numpy()
+        s = method_data["pct_increase_std"].to_numpy()
+        ax2.fill_between(x, y - s, y + s, color=palette[method], alpha=0.18)
+
+    # Determine the N_train x position for each dataset
     if "CIFAR" in csv_path.name:
-        x_line = 16.223
-        ax.axvline(x=x_line, color="gray", linestyle="--", linewidth=1, alpha=0.4)
-        ax.text(x_line, -0.025, "$N_{train}$", ha='center', va='top',  color="black", alpha=0.8,
-                transform=ax.get_xaxis_transform())
+        x_ntrain = 16.223
     elif "IMDb" in csv_path.name:
-        x_line = 11.314
-        ax.axvline(x=x_line, color="gray", linestyle="--", linewidth=1, alpha=0.4)
-        ax.text(x_line, -0.025, "$N_{train}$", ha='center', va='top',  color="black", alpha=0.8,
-                transform=ax.get_xaxis_transform())
+        x_ntrain = 11.314
     else:  # UCI
-        x_line = 12.966
-        ax.axvline(x=x_line, color="gray", linestyle="--", linewidth=1, alpha=0.4)
-        ax.text(x_line, -0.025, "$N_{train}$", ha='center', va='top', color="black", alpha=0.8,
-                transform=ax.get_xaxis_transform())
+        x_ntrain = 12.966
+
+    def reduce_y_ticks(axis: plt.Axes) -> None:
+        ticks = axis.get_yticks()
+        if len(ticks) > 1:
+            axis.set_yticks(ticks[::2])
 
     ax.set_xscale("log", base=2)
+    ax.grid(False)
+    ax.tick_params(axis="both", which="both", direction="out", length=4)
     ax.set_xlabel("Model size")
     ax.set_ylabel("Accuracy (%)")
-    ax.set_title(title)
-    ax.legend(title="Method", frameon=True, loc='lower right')
+    def legend_rowwise(labels: list[str], ncol: int) -> list[str]:
+        nrow = int(np.ceil(len(labels) / ncol))
+        ordered = []
+        for col in range(ncol):
+            for row in range(nrow):
+                idx = row * ncol + col
+                if idx < len(labels):
+                    ordered.append(labels[idx])
+        return ordered
+
+    legend_labels = legend_rowwise(legend_methods, ncol=3)
+    handles, labels = ax.get_legend_handles_labels()
+    handle_map = {label: handle for handle, label in zip(handles, labels)}
+    ordered_labels = [label for label in legend_labels if label in handle_map]
+    ordered_handles = [handle_map[label] for label in ordered_labels]
+    ax.legend(
+        ordered_handles,
+        ordered_labels,
+        loc="lower center",
+        ncol=3,
+        frameon=True,
+    )
+
+    ax2.set_xscale("log", base=2)
+    ax2.grid(False)
+    ax2.tick_params(axis="both", which="both", direction="out", length=4)
+    ax2.set_xlabel("Model size")
+    ax2.set_ylabel("% increase over Vanilla")
+    handles, labels = ax2.get_legend_handles_labels()
+    handle_map = {label: handle for handle, label in zip(handles, labels)}
+    ordered_labels = [label for label in legend_labels if label in handle_map]
+    ordered_handles = [handle_map[label] for label in ordered_labels]
+    ax2.legend(
+        ordered_handles,
+        ordered_labels,
+        loc="lower center",
+        ncol=3,
+        frameon=True,
+    )
 
     # Set custom x-axis labels based on dataset
     if "CIFAR" in csv_path.name:
@@ -166,20 +249,48 @@ def plot_csv(csv_path: Path, title: str) -> Path:
     elif "IMDb" in csv_path.name:
         size_labels = {256: "13M", 128: "3.2M", 64: "800k", 32: "200k", 16: "50k", 8: "13k"}
     else:  # UCI
-        size_labels = {8192: "4.6M", 2048: "120k", 512: "290k", 128: "73k", 32: "18k", 8: "4.5k"}
+        size_labels = {8192: "4.6M", 2048: "1.2M", 512: "290k", 128: "73k", 32: "18k", 8: "4.5k"}
 
     unique_sizes = sorted(plot_df["model_size"].unique())
-    ax.set_xticks(unique_sizes)
-    ax.set_xticklabels([size_labels.get(int(size), str(int(size))) for size in unique_sizes])
+    unique_sizes = sorted(plot_df["model_size"].unique())
+    all_ticks = sorted(unique_sizes + [x_ntrain])
+    tick_labels = [
+        "$N_{train}$" if t == x_ntrain else size_labels.get(int(t), str(int(t)))
+        for t in all_ticks
+    ]
+    for axis in (ax, ax2):
+        axis.set_xticks(all_ticks)
+        axis.set_xticklabels(tick_labels)
 
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    reduce_y_ticks(ax)
+
+    if "UCI" in csv_path.name:
+        ax2.set_yticks([-1, 0, 1, 2, 3])
+    elif "IMDb" in csv_path.name:
+        ax2.set_yticks([-0.8, -0.4, 0, 0.4])
+    else:
+        reduce_y_ticks(ax2)
+
+    fig.savefig(output_path, format="pdf", bbox_inches="tight")
     plt.close(fig)
     return output_path
 
 
 def main() -> None:
-    sns.set_theme(style="whitegrid", context="paper")
+    sns.set_theme(
+        style="ticks",
+        context="paper",
+        rc={
+            "font.size": 15,
+            "axes.titlesize": 16,
+            "axes.labelsize": 15,
+            "legend.fontsize": 14,
+            "legend.title_fontsize": 14,
+            "xtick.labelsize": 14,
+            "ytick.labelsize": 14,
+            "axes.grid": False,
+        },
+    )
     for csv_path, title in DATASETS:
         if not csv_path.exists():
             print(f"Skipping missing file: {csv_path}")
