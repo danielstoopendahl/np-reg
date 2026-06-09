@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.ticker as mticker
+import matplotlib.colors as mcolors
 
 PALETTE = {
     "Vanilla": "#C37238",
@@ -53,12 +54,7 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
         "np + opt": "NP-reg + D + WD",
     }
     df["model"] = df["model"].map(model_labels).fillna(df["model"])
-    marker_styles = {
-        "Vanilla": "o",
-        "BN/LN/None + D + WD": "s",
-        "NP-reg": "D",
-        "NP-reg + D + WD": "^",
-    }
+    # We'll enable markers for all lines, then explicitly set NP-reg to triangle.
 
     sns.set_theme(
         style="ticks",
@@ -86,9 +82,35 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
         palette=PALETTE, 
         dashes=False,
         linewidth=2.2,
-        markersize=7,
+        markersize=10,
         ax=ax,
     )
+
+    # Force NP-reg to use triangle marker on the actual plotted lines.
+    try:
+        target_rgba = mcolors.to_rgba(PALETTE["NP-reg"])
+    except Exception:
+        target_rgba = None
+    for line in ax.get_lines():
+        lab = (line.get_label() or "")
+        color = line.get_color()
+        match = False
+        # Match exact label 'NP-reg' to avoid matching 'NP-reg + D + WD'
+        if lab == "NP-reg":
+            match = True
+        elif target_rgba is not None:
+            try:
+                # compare RGB (ignore alpha)
+                rgba = mcolors.to_rgba(color)
+                if np.allclose(rgba[:3], target_rgba[:3], atol=1e-2):
+                    match = True
+            except Exception:
+                pass
+        if match:
+            line.set_marker("^")
+            line.set_markersize(10)
+            line.set_markeredgewidth(0.8)
+            line.set_markerfacecolor(line.get_color())
 
     for model, g in df.groupby("model"):
         g = g.sort_values("fraction")
@@ -105,10 +127,12 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
     ax.tick_params(axis="both", which="both", direction="out", length=4)
     ax.set_xticks(fraction_labels)
     ax.set_xticklabels(["100%", "30%", "10%", "3%", "1%"])
-    ax.set_xlabel("Training data fraction")
+    ax.set_xlabel("Training Data Fraction")
     ax.set_ylabel("Accuracy (%)")
     ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
     ax.legend(title="Model")
+    # Reduce number of y-ticks for cleaner readability
+    ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=6))
 
     if "Vanilla" not in df["model"].unique():
         raise ValueError("Could not find 'Vanilla' in model names.")
@@ -139,9 +163,28 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
         palette=PALETTE, 
         dashes=False,
         linewidth=2.2,
-        markersize=7,
+        markersize=10,
         ax=ax2,
     )
+
+    for line in ax2.get_lines():
+        lab = (line.get_label() or "")
+        color = line.get_color()
+        match = False
+        if lab == "NP-reg":
+            match = True
+        elif target_rgba is not None:
+            try:
+                rgba = mcolors.to_rgba(color)
+                if np.allclose(rgba[:3], target_rgba[:3], atol=1e-2):
+                    match = True
+            except Exception:
+                pass
+        if match:
+            line.set_marker("^")
+            line.set_markersize(10)
+            line.set_markeredgewidth(0.8)
+            line.set_markerfacecolor(line.get_color())
 
     for model, g in diff_df.groupby("model"):
         g = g.sort_values("fraction")
@@ -159,10 +202,12 @@ def plot_finetuning(csv_path: Path, output_path: Path) -> None:
     ax2.tick_params(axis="both", which="both", direction="out", length=4)
     ax2.set_xticks(fraction_labels)
     ax2.set_xticklabels(["100%", "30%", "10%", "3%", "1%"])
-    ax2.set_xlabel("Training data fraction")
-    ax2.set_ylabel("% increase over Vanilla")
+    ax2.set_xlabel("Training Data Fraction")
+    ax2.set_ylabel("% Increase Over Vanilla")
     ax2.yaxis.set_major_formatter(mticker.PercentFormatter(decimals=1))
     ax2.legend(title="Model", loc="upper right")
+    # Reduce number of y-ticks for cleaner readability
+    ax2.yaxis.set_major_locator(mticker.MaxNLocator(nbins=6))
 
     fig.savefig(output_path, format="pdf")
 

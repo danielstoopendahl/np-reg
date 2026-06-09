@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import matplotlib.colors as mcolors
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATASETS = [
@@ -116,6 +117,8 @@ def plot_csv(csv_path: Path, title: str) -> Path:
         "NP-reg": "#789EB8",
     }
 
+    # Enable markers for all lines, then explicitly set NP-reg to triangle.
+
     fig, (ax, ax2) = plt.subplots(1, 2, figsize=(16, 5), constrained_layout=True)
 
     legend_methods = ["Vanilla", "Weight Decay", "Dropout", "Layer Norm", "Batch Norm", "NP-reg"]
@@ -132,10 +135,48 @@ def plot_csv(csv_path: Path, title: str) -> Path:
         dashes=False,
         linewidth=2.7,
         alpha=0.9,
-        markersize=8,
+        markersize=10,
         palette=palette,
         ax=ax,
     )
+
+    # Robustly set markers on plotted lines by matching label or color.
+    custom_markers = {
+        "NP-reg": "^",
+        "Layer Norm": "s",
+        "Dropout": "P",
+    }
+    target_rgbas = {}
+    for cl in custom_markers:
+        try:
+            target_rgbas[cl] = mcolors.to_rgba(palette[cl])
+        except Exception:
+            pass
+
+    for line in ax.get_lines():
+        lab = (line.get_label() or "")
+        color = line.get_color()
+        matched_method = None
+        if lab in custom_markers:
+            matched_method = lab
+        else:
+            try:
+                rgba = mcolors.to_rgba(color)
+                for cl, trgba in target_rgbas.items():
+                    if np.allclose(rgba[:3], trgba[:3], atol=1e-2):
+                        matched_method = cl
+                        break
+            except Exception:
+                pass
+
+        if matched_method:
+            line.set_marker(custom_markers[matched_method])
+            if matched_method == "Layer Norm":
+                line.set_markersize(8)
+            else:
+                line.set_markersize(10)
+            line.set_markeredgewidth(0.8)
+            line.set_markerfacecolor(line.get_color())
 
     for method, method_data in plot_df.groupby("method", sort=False):
         method_data = method_data.sort_values("model_size")
@@ -173,10 +214,35 @@ def plot_csv(csv_path: Path, title: str) -> Path:
         dashes=False,
         linewidth=2.7,
         alpha=0.9,
-        markersize=8,
+        markersize=10,
         palette=palette,
         ax=ax2,
     )
+
+    for line in ax2.get_lines():
+        lab = (line.get_label() or "")
+        color = line.get_color()
+        matched_method = None
+        if lab in custom_markers:
+            matched_method = lab
+        else:
+            try:
+                rgba = mcolors.to_rgba(color)
+                for cl, trgba in target_rgbas.items():
+                    if np.allclose(rgba[:3], trgba[:3], atol=1e-2):
+                        matched_method = cl
+                        break
+            except Exception:
+                pass
+
+        if matched_method:
+            line.set_marker(custom_markers[matched_method])
+            if matched_method == "Layer Norm":
+                line.set_markersize(8)
+            else:
+                line.set_markersize(10)
+            line.set_markeredgewidth(0.8)
+            line.set_markerfacecolor(line.get_color())
 
     for method, method_data in diff_df.groupby("method", sort=False):
         method_data = method_data.sort_values("model_size")
@@ -201,7 +267,7 @@ def plot_csv(csv_path: Path, title: str) -> Path:
     ax.set_xscale("log", base=2)
     ax.grid(False)
     ax.tick_params(axis="both", which="both", direction="out", length=4)
-    ax.set_xlabel("Model size")
+    ax.set_xlabel("Model Size (#Parameters)")
     ax.set_ylabel("Accuracy (%)")
     def legend_rowwise(labels: list[str], ncol: int) -> list[str]:
         nrow = int(np.ceil(len(labels) / ncol))
@@ -229,8 +295,8 @@ def plot_csv(csv_path: Path, title: str) -> Path:
     ax2.set_xscale("log", base=2)
     ax2.grid(False)
     ax2.tick_params(axis="both", which="both", direction="out", length=4)
-    ax2.set_xlabel("Model size")
-    ax2.set_ylabel("% increase over Vanilla")
+    ax2.set_xlabel("Model Size (#Parameters)")
+    ax2.set_ylabel("% Increase Over Vanilla")
     handles, labels = ax2.get_legend_handles_labels()
     handle_map = {label: handle for handle, label in zip(handles, labels)}
     ordered_labels = [label for label in legend_labels if label in handle_map]
