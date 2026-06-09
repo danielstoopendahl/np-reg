@@ -170,7 +170,7 @@ for label in ['NP-reg', 'Vanilla', 'Batch Norm']:
     ax.fill_between(steps, loss_mins, loss_maxs, color=colors[label], label=label, alpha=0.7, linewidth=1.5, zorder=z_orders_r2_a[label])
 
 ax.set_xlabel('Steps')
-ax.set_ylabel('Loss Landscapes')
+ax.set_ylabel('Loss Landscape')
 max_steps = max(len(metrics_tabular[label]['loss_maxs']) for label in metrics_tabular)
 ax.set_xticks(np.arange(0, max_steps + 1, x_tick_step_row2))
 ax.set_xlim(0, max_steps - 1)
