@@ -28,15 +28,15 @@ gradient_stride = 5
 
 # File paths
 files_image = {
-    'Vanilla': '/home/daniel/l/masteruppsats/np-reg/image/results/stability_metrics_vanilla.json',
-    'Batch Norm': '/home/daniel/l/masteruppsats/np-reg/image/results/stability_metrics_bn.json',
-    'NP-reg': '/home/daniel/l/masteruppsats/np-reg/image/results/stability_metrics_np.json',
+    'Vanilla': '../image/results/stability_metrics_vanilla.json',
+    'Batch Norm': '../image/results/stability_metrics_bn.json',
+    'NP-reg': '../image/results/stability_metrics_np.json',
 }
 
 files_tabular = {
-    'Vanilla': '/home/daniel/l/masteruppsats/np-reg/tabular/results/stability_metrics_vanilla.json',
-    'Batch Norm': '/home/daniel/l/masteruppsats/np-reg/tabular/results/stability_metrics_bn.json',
-    'NP-reg': '/home/daniel/l/masteruppsats/np-reg/tabular/results/stability_metrics_np.json',
+    'Vanilla': '../tabular/results/stability_metrics_vanilla.json',
+    'Batch Norm': '../tabular/results/stability_metrics_bn.json',
+    'NP-reg': '../tabular/results/stability_metrics_np.json',
 }
 
 # ==========================================
@@ -104,7 +104,7 @@ for label in ['NP-reg', 'Vanilla', 'Batch Norm']:
     ax.fill_between(steps, loss_mins, loss_maxs, color=colors[label], label=label, alpha=0.7, linewidth=1.5)
 
 ax.set_xlabel('Steps')
-ax.set_ylabel('Loss Landscapes')
+ax.set_ylabel('Loss Landscape')
 max_steps = max(len(metrics_image[label]['loss_maxs']) for label in metrics_image)
 ax.set_xticks(np.arange(0, max_steps + 1, x_tick_step_row1))
 ax.set_xlim(0, max_steps - 1)
@@ -217,5 +217,5 @@ apply_legend_order(ax, legend_order, loc='upper right', handlelength=legend_hand
 # 5. SAVE COMBINED OUTPUT
 # ==========================================
 plt.tight_layout()
-plt.savefig('/home/daniel/l/masteruppsats/np-reg/util/results/combined_stability_metrics_plots.pdf', bbox_inches='tight', pad_inches=0.02)
+plt.savefig('results/combined_stability_metrics_plots.pdf', bbox_inches='tight', pad_inches=0.02)
 plt.close()
