@@ -178,30 +178,18 @@ def compute_hidden_metrics(model, x, batch_size, tau):
     use_size = min(batch_size, n_samples)
     xb = x[:use_size]
     features = model.forward_features(xb)
-    cov = features.t().mm(features) / use_size
+    
+    singular_values = torch.linalg.svdvals(features)
 
-    eigvals = torch.linalg.eigvalsh(cov)
-    sigma_max = torch.sqrt(eigvals.max() * use_size)
-    tol = sigma_max * features.size(1) * 1e-7
-
-    algebraic_rank = torch.linalg.matrix_rank(features, tol=tol).item()
-    trace = torch.trace(cov)
-    fro_norm = torch.norm(cov, p="fro")
-    soft_rank = (trace * trace / (fro_norm * fro_norm)).item()
-    soft_rank_tau = (eigvals >= tau).sum().item()
-
-    eigvals = torch.clamp(eigvals, min=0)
-    eigvals_sum = eigvals.sum()
-    if eigvals_sum > 0:
-        probs = eigvals / eigvals_sum
+    singular_values_sum = singular_values.sum()
+    if singular_values_sum > 0:
+        probs = singular_values / singular_values_sum
         entropy = -(probs * torch.log(probs + 1e-12)).sum()
         effective_rank = torch.exp(entropy).item()
     else:
         effective_rank = 0.0
 
-    singular_values = torch.linalg.svdvals(cov)
-    return singular_values, algebraic_rank, soft_rank, soft_rank_tau, effective_rank
-
+    return singular_values, effective_rank
 
 
 def main():
@@ -295,15 +283,12 @@ def main():
 
 
     # Singular values
-    singular_values, algebraic_rank, soft_rank, soft_rank_tau, effective_rank = compute_hidden_metrics(
+    singular_values, effective_rank = compute_hidden_metrics(
         model, x_test, batch_size=8192, tau=0.5
     )
     singular_values = singular_values.detach().cpu().numpy()
     print("Hidden representation singular values (H^T H / N):")
     print(singular_values)
-    print(f"Algebraic rank (tol=sigma_max * d * 1e-7): {algebraic_rank}")
-    print(f"Soft rank r(H): {soft_rank:.6f}")
-    print(f"Soft rank_tau(H), tau=0.5: {soft_rank_tau}")
     print(f"Effective rank (entropy): {effective_rank:.6f}")
 
     singular_values = np.sort(singular_values)[::-1]
