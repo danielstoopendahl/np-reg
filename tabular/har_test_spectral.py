@@ -217,7 +217,7 @@ def main():
     )
 
     singular_values, effective_rank = compute_hidden_metrics(
-        model, x_test, batch_size=8192, tau=0.5
+        model, torch.cat([x_train, x_test], dim=0), batch_size=8192, tau=0.5
     )
     singular_values = singular_values.detach().cpu().numpy()
     print("Hidden representation singular values H:")
