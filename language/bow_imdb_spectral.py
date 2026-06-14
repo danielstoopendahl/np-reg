@@ -316,7 +316,7 @@ def main():
         xb, _ = next(iter(test_loader))
         xb = xb.to(device)
         singular_values, effective_rank = compute_hidden_metrics(
-            model, xb, batch_size=2048, tau=0.5
+            model, xb, batch_size=8192, tau=0.5
         )
         singular_values = singular_values.detach().cpu().numpy()
         print("Hidden representation singular values (H^T H / N):")
